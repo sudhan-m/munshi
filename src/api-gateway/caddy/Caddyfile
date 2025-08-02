@@ -1,0 +1,116 @@
+# Caddyfile for API Gateway with mTLS
+
+# Global configuration
+{
+	# Development mode - auto HTTPS with internal CA
+	auto_https off
+	local_certs
+	
+	# Enable admin API
+	admin localhost:2019
+}
+
+# Main site configuration
+:443 {
+	# TLS configuration for client connections
+	tls internal {
+		ca_root /etc/caddy/certs/ca.crt
+	}
+	
+	# Security headers
+	header {
+		# HSTS
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# XSS Protection
+		X-XSS-Protection "1; mode=block"
+		# Content Type Options
+		X-Content-Type-Options "nosniff"
+		# Frame Options
+		X-Frame-Options "DENY"
+		# Content Security Policy
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+		# Remove server info
+		-Server
+	}
+	
+	# Rate limiting
+	rate_limit {
+		zone general {
+			key {remote_host}
+			events 100
+			window 1m
+		}
+		zone auth {
+			key {remote_host}
+			events 10
+			window 1m
+		}
+	}
+	
+	# Health check endpoint (direct to gateway)
+	handle /health {
+		reverse_proxy api-gateway:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	
+	# Auth endpoints (rate limited, proxy to gateway which proxies to auth service)
+	handle /auth/* {
+		rate_limit general auth
+		reverse_proxy api-gateway:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	
+	# Protected endpoints (proxy to gateway)
+	handle /protected/* {
+		rate_limit general
+		reverse_proxy api-gateway:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	
+	# Services management endpoints
+	handle /services* {
+		rate_limit general
+		reverse_proxy api-gateway:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	
+	# Default route to gateway
+	handle {
+		reverse_proxy api-gateway:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+	
+	# Error handling
+	handle_errors {
+		@4xx expression `{http.error.status_code} >= 400 && {http.error.status_code} < 500`
+		@5xx expression `{http.error.status_code} >= 500`
+		
+		respond @4xx "Client Error: {http.error.status_code}" {http.error.status_code}
+		respond @5xx "Server Error: {http.error.status_code}" {http.error.status_code}
+	}
+}
+
+# HTTP redirect to HTTPS
+:80 {
+	redir https://{host}{uri} permanent
+}

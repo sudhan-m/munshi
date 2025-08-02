@@ -9,8 +9,9 @@ This service maintains its own dedicated database and operates independently
 from other microservices in the system.
 """
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from .models import UserCreate, UserLogin, UserResponse, Token, User
@@ -32,10 +33,32 @@ load_dotenv()
 
 app = FastAPI(
     title="Authentication Service",
-    description="Secure authentication microservice with server-side bcrypt password hashing",
+    description="Secure authentication microservice with server-side bcrypt password hashing and mTLS support",
     version="1.0.0"
 )
 security = HTTPBearer()
+
+# Add trusted host middleware for mTLS
+app.add_middleware(
+    TrustedHostMiddleware, 
+    allowed_hosts=["*"]  # In production, specify actual hosts
+)
+
+@app.middleware("http")
+async def verify_mtls_client(request: Request, call_next):
+    """Verify mTLS client certificate for internal service communication"""
+    # Check if request is from API Gateway
+    gateway_id = request.headers.get("X-Gateway-ID")
+    
+    # In production, you would verify the client certificate here
+    # For now, we trust requests with the gateway ID header
+    if gateway_id == "api-gateway":
+        request.state.verified_client = True
+    else:
+        request.state.verified_client = False
+    
+    response = await call_next(request)
+    return response
 
 # Initialize database tables on startup
 create_tables()

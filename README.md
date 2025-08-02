@@ -11,88 +11,112 @@ This project implements a true microservices architecture where each service:
 - Communicates via HTTP APIs
 
 ```
-┌─────────────────┐    ┌─────────────────────────────────┐
-│   API Gateway   │    │       Auth Service              │
-│   (Port 8000)   │◄───┤   HTTPS (Port 443/8443)        │
-│                 │    │  ┌─────────────────────────────┐ │
-│ ┌─────────────┐ │    │  │    Nginx Reverse Proxy     │ │
-│ │ Gateway DB  │ │    │  │  (SSL Termination, Rate     │ │
-│ │(Port 5434)  │ │    │  │   Limiting, Security)       │ │
-│ └─────────────┘ │    │  └─────────────┬───────────────┘ │
-│ ┌─────────────┐ │    │                │                 │
-│ │Gateway Redis│ │    │  ┌─────────────▼───────────────┐ │
-│ │(Port 6381)  │ │    │  │   FastAPI Auth Service      │ │
-│ └─────────────┘ │    │  │      (Port 8001)            │ │
-└─────────────────┘    │  └─────────────────────────────┘ │
-                       │ ┌─────────────┐ ┌─────────────┐ │
-                       │ │   Auth DB   │ │ Auth Redis  │ │
-                       │ │ (Port 5433) │ │ (Port 6380) │ │
-                       │ └─────────────┘ └─────────────┘ │
-                       └─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Client Layer                            │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ HTTPS (TLS)
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Caddy Ingress                               │
+│           (Port 443 - TLS Termination)                     │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Rate Limiting, Security Headers, Load Balancing   │   │
+│  └─────────────────────┬───────────────────────────────┘   │
+└────────────────────────┼───────────────────────────────────┘
+                         │ HTTP (Internal)
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   API Gateway                               │
+│                  (Port 8000)                               │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
+│  │ Gateway DB  │ │Gateway Redis│ │   Service Registry   │   │
+│  │(Port 5434)  │ │(Port 6381)  │ │   Auth Middleware    │   │
+│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ mTLS (Mutual TLS)
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Auth Service                                │
+│                (Port 8001)                                 │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
+│  │   Auth DB   │ │ Auth Redis  │ │   mTLS Validation    │   │
+│  │ (Port 5433) │ │ (Port 6380) │ │   JWT Management     │   │
+│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Services
 
-### Authentication Service (HTTPS Port 443/8443)
-**Independent microservice for user authentication with SSL termination**
-- **Nginx Reverse Proxy**: HTTPS termination with mkcert (dev) / Let's Encrypt (prod)
-- **FastAPI Backend**: Internal HTTP service on port 8001
+### Caddy Ingress (HTTPS Port 443)
+**TLS termination and reverse proxy layer**
+- **Automatic HTTPS**: Self-signed certificates (dev) / Let's Encrypt (prod)
+- **Rate Limiting**: 10 req/min for auth endpoints, 100 req/min general
+- **Security Headers**: HSTS, CSP, XSS protection, and more
+- **Load Balancing**: Round-robin with health checks
+- **Admin API**: Management interface on port 2019
+
+### API Gateway (Internal Port 8000)
+**Service mesh orchestration and authentication**
+- **Dedicated Database**: PostgreSQL on port 5434 (service registry, logs)
+- **Dedicated Cache**: Redis on port 6381 (rate limiting, caching)
+- **mTLS Client**: Secure communication with auth service
+- **Service Discovery**: Dynamic service registration and health checks
+- **Authentication Middleware**: JWT token validation
+- **Request Proxying**: Intelligent routing to backend services
+- **Circuit Breaker**: Fault tolerance for downstream services
+
+### Authentication Service (Internal Port 8001)
+**Secure authentication with mTLS support**
+- **mTLS Server**: Validates gateway client certificates
 - **Dedicated Database**: PostgreSQL on port 5433
 - **Dedicated Cache**: Redis on port 6380
 - **Secure Password Handling**: Server-side bcrypt with strong validation
 - **JWT Authentication**: Stateless token-based authentication
-- **Security Features**: Rate limiting, security headers, request filtering
-- **SSL/TLS**: Strong cipher suites, HSTS, perfect forward secrecy
-
-### API Gateway (Port 8000)
-**Independent microservice for request routing and management**
-- **Dedicated Database**: PostgreSQL on port 5434 (service registry, logs)
-- **Dedicated Cache**: Redis on port 6381 (rate limiting, caching)
-- **Service Discovery**: Dynamic service registration and health checks
-- **Authentication Middleware**: Token validation via auth service
-- **Request Proxying**: Intelligent routing to backend services
-- **Rate Limiting**: IP and user-based rate limiting
-- **Circuit Breaker**: Fault tolerance for downstream services
-- **Request Logging**: Comprehensive request/response logging
+- **Client Verification**: Trusted host middleware for internal communication
 
 ## Security Features
 
-- **HTTPS Everywhere**: SSL termination with strong TLS configuration
+- **mTLS Communication**: Mutual TLS between Gateway and Auth Service
+- **TLS Termination**: HTTPS with automatic certificate management via Caddy
+- **Certificate Authority**: Internal CA for service-to-service communication
 - **Server-Side Password Hashing**: Bcrypt with salt rounds=12 and strong validation
 - **Password Strength Requirements**: Minimum 8 characters with uppercase, lowercase, and numbers
-- **Rate Limiting**: Protection against brute force attacks (5-10 req/min)
-- **Security Headers**: HSTS, CSP, X-Frame-Options, and more
+- **Rate Limiting**: Multi-tier protection (10 req/min auth, 100 req/min general)
+- **Security Headers**: HSTS, CSP, X-Frame-Options, and more via Caddy
 - **JWT Tokens**: Secure, stateless authentication
 - **Service Isolation**: Each service has separate credentials and databases
+- **Client Verification**: Trusted host middleware for internal requests
 - **Request Tracing**: Full request ID tracking across services
 - **Error Sanitization**: No sensitive data in error responses
 
 ## Deployment Options
 
-### Option 1: Full Microservices (Recommended)
-Deploy all services together with separate databases and HTTPS:
+### Option 1: Full Microservices with Caddy Ingress (Recommended)
+Deploy all services with mTLS and HTTPS termination:
 ```bash
 docker-compose -f docker-compose.microservices.yml up -d
 
 # Services available at:
-# - Auth Service: https://localhost:8443
-# - API Gateway: http://localhost:8000
+# - Caddy Ingress: https://localhost (all endpoints)
+# - Caddy Admin: http://localhost:2019
 ```
 
 ### Option 2: Independent Service Deployment
 
-**Deploy Auth Service independently with HTTPS:**
+**Deploy API Gateway with Caddy Ingress:**
+```bash
+cd src/api-gateway
+docker-compose up -d
+
+# Gateway with Caddy available at: https://localhost
+```
+
+**Deploy Auth Service independently:**
 ```bash
 cd src/auth_service
 docker-compose up -d
 
-# Auth service available at: https://localhost
-```
-
-**Deploy API Gateway independently:**
-```bash
-cd src/api-gateway
-docker-compose up -d
+# Auth service available at: http://localhost:8001
 ```
 
 ### Option 3: Manual Setup
@@ -122,26 +146,27 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## API Endpoints
 
-### Authentication Service (`https://localhost` or `https://your-domain.com:8443`)
+### API Endpoints (via Caddy Ingress at `https://localhost`)
 - `POST /auth/register` - Register new user with plaintext password (over HTTPS)
 - `POST /auth/login` - User login with plaintext password (over HTTPS)
 - `GET /auth/verify` - Verify JWT token
 - `GET /auth/me` - Get current user info
 - `GET /health` - Health check endpoint
+- `GET /services` - List registered services (authenticated)
 
-### API Gateway (`http://localhost:8000`)
-- `GET /health` - Health check
-- `GET /services` - List registered services
-- `POST /auth/*` - Proxy to auth service
-- `* /protected/{service}/*` - Authenticated proxy to services
+### Caddy Admin API (`http://localhost:2019`)
+- `GET /config/` - View current configuration
+- `GET /metrics` - Prometheus metrics
+- `POST /load` - Reload configuration
+- `GET /pki/ca/local` - View internal CA
 
 ## Authentication Flow
 
 The service uses server-side bcrypt password hashing:
 
-### Registration (HTTPS)
+### Registration (HTTPS via Caddy)
 ```bash
-curl -X POST "https://localhost/auth/register" \
+curl -k -X POST "https://localhost/auth/register" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
@@ -150,9 +175,9 @@ curl -X POST "https://localhost/auth/register" \
   }'
 ```
 
-### Login (HTTPS)
+### Login (HTTPS via Caddy)
 ```bash
-curl -X POST "https://localhost/auth/login" \
+curl -k -X POST "https://localhost/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
@@ -161,12 +186,14 @@ curl -X POST "https://localhost/auth/login" \
 ```
 
 **Security Features:**
-- **HTTPS Encryption**: All password transmission encrypted with TLS
+- **mTLS**: Mutual TLS between Gateway and Auth Service
+- **TLS Termination**: HTTPS encryption via Caddy with automatic certificates
+- **Rate limiting**: 10 req/min for auth endpoints (brute force protection)
 - **Password validation**: 8+ chars, uppercase, lowercase, numbers
 - **Bcrypt hashing**: Salt rounds=12 for strong password protection
 - **Memory safety**: Passwords cleared from memory after processing
-- **Rate limiting**: Protection against brute force attacks
-- **Security headers**: HSTS, CSP, XSS protection
+- **Security headers**: HSTS, CSP, XSS protection via Caddy
+- **Certificate Authority**: Internal CA for service communication
 - **No plaintext storage**: Passwords never stored in plaintext
 
 ## Environment Variables

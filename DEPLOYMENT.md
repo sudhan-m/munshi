@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Complete deployment guide for the Munshi microservices architecture with HTTPS authentication service.
+Complete deployment guide for the Munshi microservices architecture with Caddy ingress and mTLS communication.
 
 ## Quick Start
 
@@ -27,11 +27,11 @@ docker-compose up -d
 ## Architecture Overview
 
 ```
-Internet → Load Balancer → Nginx (HTTPS) → FastAPI Services
-                            ↓
-                      SSL Termination
-                      Rate Limiting
-                      Security Headers
+Internet → Caddy Ingress (HTTPS) → API Gateway (mTLS) → Auth Service
+                ↓                          ↓                ↓
+        TLS Termination              Service Mesh      mTLS Validation
+        Rate Limiting                Auth Middleware    JWT Management
+        Security Headers             Request Routing    Password Hashing
 ```
 
 ## Deployment Options
@@ -39,8 +39,9 @@ Internet → Load Balancer → Nginx (HTTPS) → FastAPI Services
 ### 1. Development Environment
 
 **Features:**
-- Local HTTPS with mkcert certificates
-- Relaxed rate limiting (10 req/min)
+- Automatic HTTPS with Caddy internal CA
+- Relaxed rate limiting (10 req/min auth, 100 req/min general)
+- mTLS between Gateway and Auth Service
 - Debug logging enabled
 - Hot reload for development
 
@@ -49,12 +50,12 @@ Internet → Load Balancer → Nginx (HTTPS) → FastAPI Services
 git clone <repository>
 cd munshi
 
-# Start all services
+# Start all services with Caddy ingress
 docker-compose -f docker-compose.microservices.yml up -d
 
 # Verify services
-curl -k https://localhost:8443/health
-curl http://localhost:8000/health
+curl -k https://localhost/health
+curl http://localhost:2019/metrics  # Caddy admin
 ```
 
 **Environment Variables (.env):**

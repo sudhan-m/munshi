@@ -1,4 +1,9 @@
-# Caddyfile for API Gateway with mTLS
+# Optimized Caddyfile for API Gateway with Redis Integration
+# 
+# This configuration is optimized to work with Redis-based rate limiting
+# and caching implemented in the FastAPI gateway. Caddy handles TLS
+# termination, security headers, and basic request routing while delegating
+# advanced features to the application layer.
 
 # Global configuration
 {
@@ -6,8 +11,16 @@
 	auto_https off
 	local_certs
 	
-	# Enable admin API
+	# Enable admin API for monitoring
 	admin localhost:2019
+	
+	# Optimize for performance
+	servers {
+		max_header_size 16KB
+		read_timeout 30s
+		write_timeout 30s
+		idle_timeout 120s
+	}
 }
 
 # Main site configuration
@@ -17,96 +30,166 @@
 		ca_root /etc/caddy/certs/ca.crt
 	}
 	
-	# Security headers
+	# Security headers (minimal set - FastAPI middleware handles advanced security)
 	header {
-		# HSTS
+		# HSTS for secure connections
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-		# XSS Protection
-		X-XSS-Protection "1; mode=block"
-		# Content Type Options
-		X-Content-Type-Options "nosniff"
-		# Frame Options
-		X-Frame-Options "DENY"
-		# Content Security Policy
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
-		# Remove server info
+		# Hide server information
 		-Server
+		# Add unique request ID for tracing
+		X-Request-ID {uuid}
+		# Preserve client IP information
+		X-Real-IP {remote_host}
 	}
 	
-	# Rate limiting
+	# Basic DDoS protection at network layer (FastAPI handles application-layer rate limiting)
+	# Keep this minimal since Redis-based rate limiting is more sophisticated
 	rate_limit {
-		zone general {
+		zone emergency_only {
 			key {remote_host}
-			events 100
-			window 1m
-		}
-		zone auth {
-			key {remote_host}
-			events 10
+			events 1000  # Very high limit - only for extreme DDoS
 			window 1m
 		}
 	}
 	
-	# Health check endpoint (direct to gateway)
-	handle /health {
+	# Enable response compression for better performance
+	encode gzip zstd
+	
+	# Cache static content and API responses that allow caching
+	@cacheable {
+		method GET HEAD
+		not path /auth/* /protected/*
+		header_regexp Cache-Control "(?i)(public|max-age)"
+	}
+	
+	header @cacheable {
+		Cache-Control "public, max-age=300"  # 5 minutes default
+	}
+	
+	# Health check endpoint (bypasses most middleware for fast response)
+	handle /health* {
+		# No rate limiting for health checks
+		reverse_proxy api-gateway:8000 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Gateway-Health-Check "true"
+			
+			# Fast timeout for health checks
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 10s
+			}
+		}
+	}
+	
+	# Static assets and documentation (can be cached aggressively)
+	handle /docs* /static* /favicon.ico {
 		reverse_proxy api-gateway:8000 {
 			header_up Host {upstream_hostport}
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
 		}
+		
+		# Cache static content for longer
+		header {
+			Cache-Control "public, max-age=3600"  # 1 hour
+		}
 	}
 	
-	# Auth endpoints (rate limited, proxy to gateway which proxies to auth service)
+	# Authentication endpoints (let Redis handle rate limiting)
 	handle /auth/* {
-		rate_limit general auth
+		# Apply emergency DDoS protection only
+		rate_limit emergency_only
+		
 		reverse_proxy api-gateway:8000 {
 			header_up Host {upstream_hostport}
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
+			header_up X-Request-Type "auth"
+			
+			# Longer timeout for auth operations
+			transport http {
+				dial_timeout 10s
+				response_header_timeout 30s
+			}
 		}
 	}
 	
-	# Protected endpoints (proxy to gateway)
-	handle /protected/* {
-		rate_limit general
+	# API and protected endpoints (rely on Redis-based rate limiting)
+	handle /api/* /protected/* /services* {
+		# Apply emergency DDoS protection only
+		rate_limit emergency_only
+		
 		reverse_proxy api-gateway:8000 {
 			header_up Host {upstream_hostport}
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
+			header_up X-Request-Type "api"
+			
+			# Connection pooling for better performance
+			transport http {
+				keepalive 30s
+				keepalive_idle_conns 32
+				dial_timeout 10s
+				response_header_timeout 30s
+			}
 		}
 	}
 	
-	# Services management endpoints
-	handle /services* {
-		rate_limit general
+	# Root and default routes
+	handle / {
 		reverse_proxy api-gateway:8000 {
 			header_up Host {upstream_hostport}
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
+			header_up X-Request-Type "default"
 		}
 	}
 	
-	# Default route to gateway
+	# Catch-all for any remaining routes
 	handle {
 		reverse_proxy api-gateway:8000 {
 			header_up Host {upstream_hostport}
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
+			header_up X-Request-Type "catchall"
 		}
 	}
 	
-	# Error handling
+	# Enhanced error handling with proper JSON responses
 	handle_errors {
 		@4xx expression `{http.error.status_code} >= 400 && {http.error.status_code} < 500`
 		@5xx expression `{http.error.status_code} >= 500`
+		@rate_limit expression `{http.error.status_code} == 429`
 		
-		respond @4xx "Client Error: {http.error.status_code}" {http.error.status_code}
-		respond @5xx "Server Error: {http.error.status_code}" {http.error.status_code}
+		# Rate limit errors (let application handle these with proper headers)
+		respond @rate_limit `{"error": "Rate limit exceeded", "status": 429, "retry_after": 60}` 429 {
+			header Content-Type "application/json"
+			header Retry-After "60"
+		}
+		
+		# Client errors 
+		respond @4xx `{"error": "Client error", "status": {http.error.status_code}, "message": "Invalid request"}` {http.error.status_code} {
+			header Content-Type "application/json"
+		}
+		
+		# Server errors
+		respond @5xx `{"error": "Server error", "status": {http.error.status_code}, "message": "Internal server error"}` {http.error.status_code} {
+			header Content-Type "application/json"
+		}
+	}
+	
+	# Log format optimized for monitoring and debugging
+	log {
+		format console
+		level INFO
 	}
 }
 

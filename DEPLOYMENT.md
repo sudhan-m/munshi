@@ -1,18 +1,21 @@
 # Deployment Guide
 
-Complete deployment guide for the Munshi microservices architecture with Caddy ingress and mTLS communication.
+Complete deployment guide for the Munshi microservices architecture with Redis caching, Caddy reverse proxy, advanced rate limiting, and mTLS communication.
 
 ## Quick Start
 
 ### Development (Local HTTPS)
 
 ```bash
-# Full microservices with HTTPS auth
+# Full microservices with Redis caching and HTTPS auth
 docker-compose -f docker-compose.microservices.yml up -d
 
 # Services available at:
-# - Auth Service: https://localhost:8443
-# - API Gateway: http://localhost:8000
+# - Caddy Reverse Proxy: https://localhost (entry point)
+# - Auth Service: https://localhost:8001 (internal via mTLS)
+# - API Gateway: http://localhost:8000 (internal)
+# - Redis Auth Cache: redis://localhost:6380/1
+# - Redis Gateway Cache: redis://localhost:6381/0
 ```
 
 ### Single Auth Service (Local HTTPS)
@@ -21,18 +24,119 @@ docker-compose -f docker-compose.microservices.yml up -d
 cd src/auth_service
 docker-compose up -d
 
-# Auth service available at: https://localhost
+# Services available at:
+# - Auth Service via Caddy: https://localhost
+# - Auth Redis Cache: redis://localhost:6380/1
+# - Auth PostgreSQL: postgresql://localhost:5433/auth_db
 ```
 
 ## Architecture Overview
 
 ```
-Internet → Caddy Ingress (HTTPS) → API Gateway (mTLS) → Auth Service
-                ↓                          ↓                ↓
-        TLS Termination              Service Mesh      mTLS Validation
-        Rate Limiting                Auth Middleware    JWT Management
-        Security Headers             Request Routing    Password Hashing
+Internet → Caddy Reverse Proxy (HTTPS) → API Gateway → Auth Service (mTLS)
+                ↓                              ↓              ↓
+        TLS Termination                Redis Cache     Redis Cache
+        Request Tracing              Rate Limiting    Token Blacklist
+        Response Compression         Response Cache   Session Management
+        Emergency DDoS Protection    Circuit Breaker  Failed Login Track
 ```
+
+## Redis Cache Requirements
+
+### **Redis Infrastructure**
+
+The Munshi architecture requires two separate Redis instances for optimal performance and security isolation:
+
+#### **Authentication Service Redis (Database 1)**
+- **Port**: 6380 (development) / 6379 (production with network isolation)
+- **Database**: 1
+- **Memory Requirements**: 256MB minimum, 512MB recommended
+- **Persistence**: RDB snapshots for failed login tracking
+- **Features**:
+  - JWT token blacklisting
+  - User session caching (1-hour TTL)
+  - Failed login attempt tracking (15-minute sliding window)
+  - Account lockout management (15-minute TTL)
+
+#### **API Gateway Redis (Database 0)**
+- **Port**: 6381 (development) / 6379 (production with network isolation)
+- **Database**: 0
+- **Memory Requirements**: 512MB minimum, 1GB recommended
+- **Persistence**: RDB + AOF for rate limiting data integrity
+- **Features**:
+  - Sliding window rate limiting (Redis sorted sets)
+  - Response caching (5-10 minute TTL)
+  - Service discovery cache (60-second TTL)
+  - Circuit breaker state tracking
+
+### **Redis Configuration**
+
+#### **Development Configuration (redis.conf)**
+```redis
+# Memory management
+maxmemory 512mb
+maxmemory-policy allkeys-lru
+
+# Persistence
+save 900 1
+save 300 10
+save 60 10000
+
+# Security
+requirepass your_redis_password
+protected-mode yes
+
+# Performance
+tcp-keepalive 300
+timeout 300
+```
+
+#### **Production Configuration**
+```redis
+# Memory management
+maxmemory 2gb
+maxmemory-policy allkeys-lru
+
+# Persistence (critical for rate limiting)
+save 900 1
+save 300 10
+save 60 10000
+appendonly yes
+appendfsync everysec
+
+# Security
+requirepass strong_redis_password_change_in_production
+protected-mode yes
+bind 127.0.0.1 ::1
+
+# Performance optimization
+tcp-keepalive 300
+timeout 300
+tcp-backlog 511
+databases 16
+```
+
+### **Redis Monitoring**
+
+#### **Health Checks**
+```bash
+# Test Redis connectivity
+redis-cli -h localhost -p 6380 -a password ping
+redis-cli -h localhost -p 6381 -a password ping
+
+# Check memory usage
+redis-cli -h localhost -p 6380 info memory
+redis-cli -h localhost -p 6381 info memory
+
+# Monitor cache hit rates
+redis-cli -h localhost -p 6381 info stats | grep cache
+```
+
+#### **Performance Metrics**
+- **Hit Rate**: Target >95% for authentication cache, >80% for response cache
+- **Memory Usage**: Should not exceed 80% of allocated memory
+- **Connection Count**: Monitor for connection leaks
+- **Eviction Rate**: Should be minimal with proper TTL management
 
 ## Deployment Options
 
@@ -40,8 +144,11 @@ Internet → Caddy Ingress (HTTPS) → API Gateway (mTLS) → Auth Service
 
 **Features:**
 - Automatic HTTPS with Caddy internal CA
-- Relaxed rate limiting (10 req/min auth, 100 req/min general)
+- Redis-powered advanced rate limiting (1000-5000 req/min based on auth status)
+- Response caching for improved performance (5-10 min TTL)
+- JWT token blacklisting for secure logout
 - mTLS between Gateway and Auth Service
+- Failed login tracking and account lockout protection
 - Debug logging enabled
 - Hot reload for development
 
@@ -60,20 +167,38 @@ curl http://localhost:2019/metrics  # Caddy admin
 
 **Environment Variables (.env):**
 ```bash
+# Common Settings
 ENVIRONMENT=development
 DEBUG=true
-JWT_SECRET_KEY=development_secret_key_change_in_production
+
+# Auth Service Configuration
 AUTH_DATABASE_URL=postgresql://auth_user:auth_password@auth-postgres:5432/auth_db
+AUTH_REDIS_URL=redis://auth-redis:6379/1
+JWT_SECRET_KEY=development_secret_key_change_in_production
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+MAX_LOGIN_ATTEMPTS=5
+ACCOUNT_LOCKOUT_MINUTES=15
+
+# API Gateway Configuration
+GATEWAY_DATABASE_URL=postgresql://gateway_user:gateway_password@gateway-postgres:5432/gateway_db
+GATEWAY_REDIS_URL=redis://gateway-redis:6379/0
+AUTH_SERVICE_URL=https://auth-service:8001
+RATE_LIMIT_ENABLED=true
+DEFAULT_RATE_LIMIT_REQUESTS=1000
+AUTHENTICATED_RATE_LIMIT_REQUESTS=5000
 ```
 
 ### 2. Production Environment
 
 **Features:**
-- Let's Encrypt SSL certificates
-- Strict rate limiting (5 req/min)
-- Production security headers
-- Comprehensive logging
-- Health monitoring
+- Let's Encrypt SSL certificates with automatic renewal
+- Enhanced Redis-based rate limiting with production thresholds
+- Response caching for optimal performance
+- Production security headers and HSTS enforcement
+- Comprehensive logging with request correlation
+- Health monitoring and metrics collection
+- Redis persistence for cache durability
+- Connection pooling optimization
 
 **Setup:**
 ```bash

@@ -23,10 +23,14 @@ from .auth import (
     verify_token,
     get_user_by_email,
     get_user_by_username,
+    blacklist_token,
+    logout_user,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
+from .cache import get_cache, close_cache
 import os
 import re
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -60,8 +64,23 @@ async def verify_mtls_client(request: Request, call_next):
     response = await call_next(request)
     return response
 
-# Initialize database tables on startup
+# Initialize database tables and Redis cache on startup
 create_tables()
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize Redis cache connection on startup."""
+    cache = get_cache()
+    if cache.is_connected():
+        logging.info("Auth service connected to Redis cache")
+    else:
+        logging.warning("Auth service failed to connect to Redis cache")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up Redis cache connection on shutdown."""
+    close_cache()
+    logging.info("Auth service Redis cache connection closed")
 
 credentials_exception = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -215,6 +234,42 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if user is None:
         raise credentials_exception
     return UserResponse.from_orm(user)
+
+
+@app.post("/auth/logout")
+async def logout(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+    """
+    Logout user by blacklisting their JWT token.
+    
+    Adds the provided JWT token to the blacklist and clears user session cache.
+    This prevents the token from being used for future authentication.
+    
+    Args:
+        credentials: HTTP Bearer token from Authorization header
+        db: Database session dependency
+        
+    Returns:
+        dict: Logout confirmation message
+        
+    Raises:
+        HTTPException: 401 if token is invalid
+    """
+    # Verify token is valid before blacklisting
+    token_data = verify_token(credentials.credentials, credentials_exception)
+    user = get_user_by_email(db, token_data.email)
+    if user is None:
+        raise credentials_exception
+    
+    # Logout user (blacklist token and clear session)
+    success = logout_user(user.id, credentials.credentials)
+    
+    if success:
+        return {"message": "Successfully logged out"}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Logout failed"
+        )
 
 
 @app.get("/health")

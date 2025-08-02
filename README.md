@@ -1,14 +1,16 @@
 # Munshi Microservices Architecture
 
-A secure, production-ready microservices architecture with independent API Gateway and Authentication services built with Python FastAPI.
+A secure, production-ready microservices architecture with independent API Gateway and Authentication services built with Python FastAPI. Features distributed Redis caching, intelligent rate limiting, and optimized reverse proxy integration.
 
 ## Architecture Overview
 
 This project implements a true microservices architecture where each service:
-- Has its own dedicated database
-- Can be deployed independently
+- Has its own dedicated database and Redis cache
+- Can be deployed independently with full isolation
 - Has separate configuration and dependencies
-- Communicates via HTTP APIs
+- Communicates via HTTP APIs with mTLS security
+- Features distributed caching and rate limiting
+- Implements intelligent middleware for performance optimization
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -17,10 +19,11 @@ This project implements a true microservices architecture where each service:
                       │ HTTPS (TLS)
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 Caddy Ingress                               │
+│                 Caddy Reverse Proxy                         │
 │           (Port 443 - TLS Termination)                     │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  Rate Limiting, Security Headers, Load Balancing   │   │
+│  │  Emergency DDoS Protection, Security Headers        │   │
+│  │  Response Compression, Request Tracing              │   │
 │  └─────────────────────┬───────────────────────────────┘   │
 └────────────────────────┼───────────────────────────────────┘
                          │ HTTP (Internal)
@@ -29,8 +32,10 @@ This project implements a true microservices architecture where each service:
 │                   API Gateway                               │
 │                  (Port 8000)                               │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │ Gateway DB  │ │Gateway Redis│ │   Service Registry   │   │
-│  │(Port 5434)  │ │(Port 6381)  │ │   Auth Middleware    │   │
+│  │ Gateway DB  │ │Gateway Redis│ │ Redis Rate Limiting  │   │
+│  │(Port 5434)  │ │(Port 6381)  │ │ Response Caching     │   │
+│  │             │ │             │ │ Service Registry     │   │
+│  │             │ │             │ │ Circuit Breaker      │   │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘   │
 └─────────────────────┬───────────────────────────────────────┘
                       │ mTLS (Mutual TLS)
@@ -39,54 +44,78 @@ This project implements a true microservices architecture where each service:
 │                 Auth Service                                │
 │                (Port 8001)                                 │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │   Auth DB   │ │ Auth Redis  │ │   mTLS Validation    │   │
-│  │ (Port 5433) │ │ (Port 6380) │ │   JWT Management     │   │
+│  │   Auth DB   │ │ Auth Redis  │ │ Token Blacklisting   │   │
+│  │ (Port 5433) │ │ (Port 6380) │ │ User Session Cache   │   │
+│  │             │ │             │ │ Failed Login Track   │   │
+│  │             │ │             │ │ Account Lockout      │   │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## Services
 
-### Caddy Ingress (HTTPS Port 443)
-**TLS termination and reverse proxy layer**
+### Caddy Reverse Proxy (HTTPS Port 443)
+**Optimized TLS termination and request routing**
 - **Automatic HTTPS**: Self-signed certificates (dev) / Let's Encrypt (prod)
-- **Rate Limiting**: 10 req/min for auth endpoints, 100 req/min general
-- **Security Headers**: HSTS, CSP, XSS protection, and more
-- **Load Balancing**: Round-robin with health checks
+- **Emergency DDoS Protection**: High threshold rate limiting (1000 req/min)
+- **Response Compression**: gzip and zstd compression for better performance
+- **Request Tracing**: Unique request IDs for correlation across services
+- **Connection Pooling**: Optimized HTTP connections to API Gateway
+- **Security Headers**: HSTS enforcement and server information hiding
 - **Admin API**: Management interface on port 2019
 
 ### API Gateway (Internal Port 8000)
-**Service mesh orchestration and authentication**
+**Intelligent service mesh with Redis-powered features**
 - **Dedicated Database**: PostgreSQL on port 5434 (service registry, logs)
-- **Dedicated Cache**: Redis on port 6381 (rate limiting, caching)
-- **mTLS Client**: Secure communication with auth service
-- **Service Discovery**: Dynamic service registration and health checks
-- **Authentication Middleware**: JWT token validation
-- **Request Proxying**: Intelligent routing to backend services
-- **Circuit Breaker**: Fault tolerance for downstream services
+- **Dedicated Redis Cache**: Redis on port 6381 with advanced features:
+  - **Sliding Window Rate Limiting**: 1000 req/min (anonymous), 5000 req/min (authenticated)
+  - **Response Caching**: Intelligent GET request caching with TTL management
+  - **Service Discovery Cache**: Fast service resolution with 60s TTL
+  - **Circuit Breaker State**: Distributed fault tolerance tracking
+- **Authentication Middleware**: JWT token validation with blacklist checking
+- **Request Proxying**: Intelligent routing with connection pooling
+- **Enhanced Logging**: Request tracing with timing and correlation IDs
 
 ### Authentication Service (Internal Port 8001)
-**Secure authentication with mTLS support**
+**Secure authentication with Redis-powered security features**
 - **mTLS Server**: Validates gateway client certificates
-- **Dedicated Database**: PostgreSQL on port 5433
-- **Dedicated Cache**: Redis on port 6380
+- **Dedicated Database**: PostgreSQL on port 5433 (user accounts)
+- **Dedicated Redis Cache**: Redis on port 6380 with security features:
+  - **JWT Token Blacklisting**: Instant logout and token invalidation
+  - **User Session Caching**: Fast session lookup with 1-hour TTL
+  - **Failed Login Tracking**: Sliding window attempt counting (15-min TTL)
+  - **Account Lockout Protection**: Automatic lockout after 5 failed attempts
 - **Secure Password Handling**: Server-side bcrypt with strong validation
-- **JWT Authentication**: Stateless token-based authentication
-- **Client Verification**: Trusted host middleware for internal communication
+- **Enhanced Authentication**: Rate-limited login with intelligent caching
 
 ## Security Features
 
+### **Multi-Layer Security Architecture**
 - **mTLS Communication**: Mutual TLS between Gateway and Auth Service
 - **TLS Termination**: HTTPS with automatic certificate management via Caddy
 - **Certificate Authority**: Internal CA for service-to-service communication
+- **Redis-Powered Security**: Distributed security features across all services
+
+### **Authentication & Session Security**
+- **JWT Token Blacklisting**: Instant logout with Redis-based token invalidation
+- **User Session Caching**: Secure session management with automatic expiration
 - **Server-Side Password Hashing**: Bcrypt with salt rounds=12 and strong validation
 - **Password Strength Requirements**: Minimum 8 characters with uppercase, lowercase, and numbers
-- **Rate Limiting**: Multi-tier protection (10 req/min auth, 100 req/min general)
+- **Account Lockout Protection**: Automatic protection against brute force attacks
+
+### **Advanced Rate Limiting**
+- **Sliding Window Algorithm**: Precise rate limiting using Redis sorted sets
+- **Differentiated Limits**: Higher limits for authenticated users (5000 req/min vs 1000 req/min)
+- **Failed Login Tracking**: Per-user attempt counting with 15-minute sliding windows
+- **Emergency DDoS Protection**: Caddy-level protection for extreme attacks (1000 req/min)
+- **Graceful Degradation**: Rate limiting fails open if Redis is unavailable
+
+### **Request Security & Monitoring**
+- **Request Tracing**: Full correlation ID tracking from Caddy through all services
 - **Security Headers**: HSTS, CSP, X-Frame-Options, and more via Caddy
-- **JWT Tokens**: Secure, stateless authentication
-- **Service Isolation**: Each service has separate credentials and databases
+- **Service Isolation**: Each service has separate credentials, databases, and Redis instances
 - **Client Verification**: Trusted host middleware for internal requests
-- **Request Tracing**: Full request ID tracking across services
+- **Enhanced Logging**: Structured logging with timing and security context
 - **Error Sanitization**: No sensitive data in error responses
 
 ## Deployment Options
@@ -147,12 +176,31 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ## API Endpoints
 
 ### API Endpoints (via Caddy Ingress at `https://localhost`)
+
+#### **Authentication Endpoints**
 - `POST /auth/register` - Register new user with plaintext password (over HTTPS)
-- `POST /auth/login` - User login with plaintext password (over HTTPS)
-- `GET /auth/verify` - Verify JWT token
-- `GET /auth/me` - Get current user info
-- `GET /health` - Health check endpoint
+- `POST /auth/login` - User login with plaintext password (over HTTPS) 
+- `POST /auth/logout` - Logout user and blacklist JWT token (authenticated)
+- `GET /auth/verify` - Verify JWT token (includes blacklist checking)
+- `GET /auth/me` - Get current user info (with session caching)
+
+#### **System Endpoints**
+- `GET /health` - Health check endpoint (bypasses rate limiting)
 - `GET /services` - List registered services (authenticated)
+
+#### **Rate Limiting Headers**
+All API responses include rate limiting information:
+- `X-RateLimit-Limit` - Total requests allowed per window
+- `X-RateLimit-Remaining` - Requests remaining in current window
+- `X-RateLimit-Reset` - Unix timestamp when window resets
+- `X-RateLimit-Window` - Rate limit window duration in seconds
+- `X-RateLimit-Client` - Client type (ip/user)
+
+#### **Caching Headers**
+Cached responses include cache status:
+- `X-Cache` - Cache status (HIT/MISS)
+- `X-Cache-Date` - When response was cached (for HIT)
+- `X-Cache-TTL` - Cache TTL in seconds (for MISS)
 
 ### Caddy Admin API (`http://localhost:2019`)
 - `GET /config/` - View current configuration
@@ -185,28 +233,96 @@ curl -k -X POST "https://localhost/auth/login" \
   }'
 ```
 
-**Security Features:**
+**Security & Performance Features:**
 - **mTLS**: Mutual TLS between Gateway and Auth Service
 - **TLS Termination**: HTTPS encryption via Caddy with automatic certificates
-- **Rate limiting**: 10 req/min for auth endpoints (brute force protection)
-- **Password validation**: 8+ chars, uppercase, lowercase, numbers
+- **Advanced Rate Limiting**: Redis-based sliding window (1000-5000 req/min based on auth status)
+- **JWT Token Blacklisting**: Instant logout with Redis-powered token invalidation
+- **Password validation**: 8+ chars, uppercase, lowercase, numbers with failed attempt tracking
 - **Bcrypt hashing**: Salt rounds=12 for strong password protection
-- **Memory safety**: Passwords cleared from memory after processing
+- **Account Lockout**: Automatic protection after 5 failed login attempts
+- **Response Caching**: Intelligent GET request caching for improved performance
 - **Security headers**: HSTS, CSP, XSS protection via Caddy
 - **Certificate Authority**: Internal CA for service communication
-- **No plaintext storage**: Passwords never stored in plaintext
+- **Memory safety**: Passwords cleared from memory after processing
+
+## Redis Cache Features
+
+### **Authentication Service Cache (Redis DB 1)**
+- **Token Blacklist**: Instant JWT invalidation on logout
+- **User Sessions**: 1-hour cached session data for authenticated users
+- **Failed Login Tracking**: 15-minute sliding window for brute force protection
+- **Account Lockout**: Automatic 15-minute lockout after 5 failed attempts
+- **Cache TTL Management**: Automatic expiration based on token/session lifecycles
+
+### **API Gateway Cache (Redis DB 0)**
+- **Rate Limiting**: Sliding window algorithm with Redis sorted sets
+- **Response Caching**: GET request caching with configurable TTL (5-10 minutes)
+- **Service Discovery**: 60-second service information caching
+- **Circuit Breaker**: Distributed failure state tracking
+- **Connection Pooling**: Optimized Redis connections (50 max for gateway, 20 for auth)
+
+### **Cache Performance Benefits**
+- **Reduced Database Load**: Session and service data cached in Redis
+- **Faster Authentication**: Blacklist and session checks in sub-millisecond time
+- **Improved Rate Limiting**: Precise sliding window calculations
+- **Better User Experience**: Cached responses for faster API performance
+- **High Availability**: Graceful degradation when Redis is unavailable
 
 ## Environment Variables
 
+### **Authentication Service**
 ```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/munshi_db
-REDIS_URL=redis://localhost:6379/0
-JWT_SECRET_KEY=your_secret_key_here
+# Database Configuration
+AUTH_DATABASE_URL=postgresql://auth_user:auth_password@localhost:5433/auth_db
+
+# Redis Cache Configuration
+AUTH_REDIS_URL=redis://localhost:6380/1
+
+# JWT Configuration
+JWT_SECRET_KEY=your_secret_key_here_change_in_production
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
-API_GATEWAY_PORT=8000
+
+# Service Configuration
+AUTH_SERVICE_HOST=0.0.0.0
 AUTH_SERVICE_PORT=8001
-AUTH_SERVICE_URL=http://localhost:8001
+ENVIRONMENT=development
+
+# Security Configuration
+PASSWORD_MIN_LENGTH=8
+MAX_LOGIN_ATTEMPTS=5
+ACCOUNT_LOCKOUT_MINUTES=15
+```
+
+### **API Gateway**
+```bash
+# Database Configuration  
+GATEWAY_DATABASE_URL=postgresql://gateway_user:gateway_password@localhost:5434/gateway_db
+
+# Redis Cache Configuration
+GATEWAY_REDIS_URL=redis://localhost:6381/0
+
+# Service Discovery
+AUTH_SERVICE_URL=https://localhost:8001
+
+# Rate Limiting Configuration
+RATE_LIMIT_ENABLED=true
+DEFAULT_RATE_LIMIT_REQUESTS=1000
+DEFAULT_RATE_LIMIT_WINDOW=60
+AUTHENTICATED_RATE_LIMIT_REQUESTS=5000
+AUTHENTICATED_RATE_LIMIT_WINDOW=60
+
+# Gateway Configuration
+GATEWAY_HOST=0.0.0.0
+GATEWAY_PORT=8000
+ENVIRONMENT=development
+
+# Security & Features
+JWT_VERIFICATION_ENABLED=true
+CIRCUIT_BREAKER_ENABLED=true
+METRICS_ENABLED=true
+ACCESS_LOG_ENABLED=true
 ```
 
 ## Development

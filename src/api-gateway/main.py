@@ -4,24 +4,40 @@ from fastapi.responses import JSONResponse
 import time
 import uuid
 import os
+import logging
 from .router import create_gateway_router
+from .cache import get_gateway_cache, close_gateway_cache
+from .middleware import (
+    create_rate_limit_middleware,
+    create_response_cache_middleware,
+    create_logging_middleware
+)
+from .config import get_gateway_settings
 from dotenv import load_dotenv
 
 load_dotenv()
 
+settings = get_gateway_settings()
+
 app = FastAPI(
     title="API Gateway",
-    description="Secure API Gateway with authentication and service discovery",
+    description="Secure API Gateway with Redis caching, rate limiting, and authentication",
     version="1.0.0"
 )
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.allowed_origins,
+    allow_credentials=settings.allow_credentials,
+    allow_methods=settings.allowed_methods,
+    allow_headers=settings.allowed_headers,
 )
+
+# Add Redis-based middleware in proper order
+app.middleware("http")(create_logging_middleware())
+app.middleware("http")(create_rate_limit_middleware())
+app.middleware("http")(create_response_cache_middleware())
 
 @app.middleware("http")
 async def add_request_id_and_timing(request: Request, call_next):
@@ -70,6 +86,22 @@ async def health_check():
         "timestamp": time.time(),
         "service": "api-gateway"
     }
+
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup_event():
+    """Initialize Redis cache connection on startup."""
+    cache = get_gateway_cache()
+    if cache.is_connected():
+        logging.info("API Gateway connected to Redis cache")
+    else:
+        logging.warning("API Gateway failed to connect to Redis cache")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up Redis cache connection on shutdown."""
+    close_gateway_cache()
+    logging.info("API Gateway Redis cache connection closed")
 
 gateway_router = create_gateway_router()
 app.include_router(gateway_router)

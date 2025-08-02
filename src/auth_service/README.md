@@ -152,8 +152,8 @@ graph LR
     JWT --> PAYLOAD["Payload<br/>User Data & Claims"]
     JWT --> SIGNATURE["Signature<br/>Verification Hash"]
     
-    HEADER --> H_DATA["{alg: HS256, typ: JWT}"]
-    PAYLOAD --> P_DATA["{sub: user@example.com, exp: 1634567890}"]
+    HEADER --> H_DATA["Algorithm: HS256<br/>Type: JWT"]
+    PAYLOAD --> P_DATA["Subject: user email<br/>Expires: timestamp"]
     SIGNATURE --> S_DATA["HMACSHA256 hash"]
     
     style HEADER fill:#e3f2fd

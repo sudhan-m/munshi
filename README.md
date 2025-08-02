@@ -11,32 +11,38 @@ This project implements a true microservices architecture where each service:
 - Communicates via HTTP APIs
 
 ```
-┌─────────────────┐    ┌─────────────────┐
-│   API Gateway   │    │  Auth Service   │
-│   (Port 8000)   │◄───┤   (Port 8001)   │
-│                 │    │                 │
-│ ┌─────────────┐ │    │ ┌─────────────┐ │
-│ │ Gateway DB  │ │    │ │   Auth DB   │ │
-│ │(Port 5434)  │ │    │ │ (Port 5433) │ │
-│ └─────────────┘ │    │ └─────────────┘ │
-│ ┌─────────────┐ │    │ ┌─────────────┐ │
-│ │Gateway Redis│ │    │ │ Auth Redis  │ │
-│ │(Port 6381)  │ │    │ │ (Port 6380) │ │
-│ └─────────────┘ │    │ └─────────────┘ │
-└─────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌─────────────────────────────────┐
+│   API Gateway   │    │       Auth Service              │
+│   (Port 8000)   │◄───┤   HTTPS (Port 443/8443)        │
+│                 │    │  ┌─────────────────────────────┐ │
+│ ┌─────────────┐ │    │  │    Nginx Reverse Proxy     │ │
+│ │ Gateway DB  │ │    │  │  (SSL Termination, Rate     │ │
+│ │(Port 5434)  │ │    │  │   Limiting, Security)       │ │
+│ └─────────────┘ │    │  └─────────────┬───────────────┘ │
+│ ┌─────────────┐ │    │                │                 │
+│ │Gateway Redis│ │    │  ┌─────────────▼───────────────┐ │
+│ │(Port 6381)  │ │    │  │   FastAPI Auth Service      │ │
+│ └─────────────┘ │    │  │      (Port 8001)            │ │
+└─────────────────┘    │  └─────────────────────────────┘ │
+                       │ ┌─────────────┐ ┌─────────────┐ │
+                       │ │   Auth DB   │ │ Auth Redis  │ │
+                       │ │ (Port 5433) │ │ (Port 6380) │ │
+                       │ └─────────────┘ └─────────────┘ │
+                       └─────────────────────────────────┘
 ```
 
 ## Services
 
-### Authentication Service (Port 8001)
-**Independent microservice for user authentication**
+### Authentication Service (HTTPS Port 443/8443)
+**Independent microservice for user authentication with SSL termination**
+- **Nginx Reverse Proxy**: HTTPS termination with mkcert (dev) / Let's Encrypt (prod)
+- **FastAPI Backend**: Internal HTTP service on port 8001
 - **Dedicated Database**: PostgreSQL on port 5433
 - **Dedicated Cache**: Redis on port 6380
-- **Secure Password Handling**: Client-side PBKDF2 + server-side bcrypt
+- **Secure Password Handling**: Server-side bcrypt with strong validation
 - **JWT Authentication**: Stateless token-based authentication
-- **User Management**: Registration, login, profile management
-- **Rate Limiting**: Per-user request limiting
-- **Account Security**: Login attempt tracking, account lockout
+- **Security Features**: Rate limiting, security headers, request filtering
+- **SSL/TLS**: Strong cipher suites, HSTS, perfect forward secrecy
 
 ### API Gateway (Port 8000)
 **Independent microservice for request routing and management**
@@ -51,8 +57,11 @@ This project implements a true microservices architecture where each service:
 
 ## Security Features
 
-- **No Plaintext Passwords**: Client-side PBKDF2 hashing before transmission
-- **Double Hashing**: Server-side bcrypt on client hashes
+- **HTTPS Everywhere**: SSL termination with strong TLS configuration
+- **Server-Side Password Hashing**: Bcrypt with salt rounds=12 and strong validation
+- **Password Strength Requirements**: Minimum 8 characters with uppercase, lowercase, and numbers
+- **Rate Limiting**: Protection against brute force attacks (5-10 req/min)
+- **Security Headers**: HSTS, CSP, X-Frame-Options, and more
 - **JWT Tokens**: Secure, stateless authentication
 - **Service Isolation**: Each service has separate credentials and databases
 - **Request Tracing**: Full request ID tracking across services
@@ -61,17 +70,23 @@ This project implements a true microservices architecture where each service:
 ## Deployment Options
 
 ### Option 1: Full Microservices (Recommended)
-Deploy all services together with separate databases:
+Deploy all services together with separate databases and HTTPS:
 ```bash
 docker-compose -f docker-compose.microservices.yml up -d
+
+# Services available at:
+# - Auth Service: https://localhost:8443
+# - API Gateway: http://localhost:8000
 ```
 
 ### Option 2: Independent Service Deployment
 
-**Deploy Auth Service independently:**
+**Deploy Auth Service independently with HTTPS:**
 ```bash
 cd src/auth_service
 docker-compose up -d
+
+# Auth service available at: https://localhost
 ```
 
 **Deploy API Gateway independently:**
@@ -82,11 +97,16 @@ docker-compose up -d
 
 ### Option 3: Manual Setup
 
-**Auth Service:**
+**Auth Service with Reverse Proxy:**
 ```bash
 cd src/auth_service
 cp .env.example .env
 # Edit .env with your configurations
+
+# Option 1: With HTTPS reverse proxy (recommended)
+docker-compose up -d
+
+# Option 2: Direct HTTP (development only)
 pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8001
 ```
@@ -102,12 +122,12 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## API Endpoints
 
-### Authentication Service (`http://localhost:8001`)
-- `GET /auth/salt` - Get salt for password hashing
-- `POST /auth/register` - Register new user
-- `POST /auth/login` - User login
+### Authentication Service (`https://localhost` or `https://your-domain.com:8443`)
+- `POST /auth/register` - Register new user with plaintext password (over HTTPS)
+- `POST /auth/login` - User login with plaintext password (over HTTPS)
 - `GET /auth/verify` - Verify JWT token
 - `GET /auth/me` - Get current user info
+- `GET /health` - Health check endpoint
 
 ### API Gateway (`http://localhost:8000`)
 - `GET /health` - Health check
@@ -115,21 +135,39 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 - `POST /auth/*` - Proxy to auth service
 - `* /protected/{service}/*` - Authenticated proxy to services
 
-## Client-Side Password Hashing
+## Authentication Flow
 
-To maintain security, passwords must be hashed client-side before sending:
+The service uses server-side bcrypt password hashing:
 
-```python
-import hashlib
-
-def hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hex(password.encode('utf-8'), salt.encode('utf-8'), 100000, 64)
-
-# Usage:
-# 1. GET /auth/salt to get a salt
-# 2. Hash password with salt
-# 3. Send hashed password in registration/login
+### Registration (HTTPS)
+```bash
+curl -X POST "https://localhost/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "username": "johndoe",
+    "password": "MySecurePass123"
+  }'
 ```
+
+### Login (HTTPS)
+```bash
+curl -X POST "https://localhost/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "MySecurePass123"
+  }'
+```
+
+**Security Features:**
+- **HTTPS Encryption**: All password transmission encrypted with TLS
+- **Password validation**: 8+ chars, uppercase, lowercase, numbers
+- **Bcrypt hashing**: Salt rounds=12 for strong password protection
+- **Memory safety**: Passwords cleared from memory after processing
+- **Rate limiting**: Protection against brute force attacks
+- **Security headers**: HSTS, CSP, XSS protection
+- **No plaintext storage**: Passwords never stored in plaintext
 
 ## Environment Variables
 

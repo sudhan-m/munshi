@@ -2,8 +2,8 @@
 Authentication Service - Main FastAPI Application
 
 A secure authentication microservice that provides user registration, login,
-and JWT token management. Implements client-side password hashing to ensure
-no plaintext passwords are ever transmitted over the network.
+and JWT token management. Implements server-side bcrypt password hashing
+with strong validation and secure memory handling.
 
 This service maintains its own dedicated database and operates independently
 from other microservices in the system.
@@ -22,17 +22,17 @@ from .auth import (
     verify_token,
     get_user_by_email,
     get_user_by_username,
-    get_salt,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
 import os
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = FastAPI(
     title="Authentication Service",
-    description="Secure authentication microservice with client-side password hashing",
+    description="Secure authentication microservice with server-side bcrypt password hashing",
     version="1.0.0"
 )
 security = HTTPBearer()
@@ -47,43 +47,55 @@ credentials_exception = HTTPException(
 )
 
 
-@app.get("/auth/salt")
-async def get_password_salt():
-    """
-    Get a cryptographic salt for client-side password hashing.
-    
-    Clients must hash their passwords with PBKDF2 using this salt before
-    sending registration or login requests. This ensures no plaintext
-    passwords are ever transmitted.
-    
-    Returns:
-        dict: Contains a 64-character hexadecimal salt string
-        
-    Example:
-        GET /auth/salt
-        Response: {"salt": "a1b2c3d4..."}
-    """
-    return {"salt": get_salt()}
-
 
 @app.post("/auth/register", response_model=UserResponse)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     """
-    Register a new user account with pre-hashed password.
+    Register a new user account with plaintext password.
     
-    Expects a client-side PBKDF2 hashed password. The server will apply
-    additional bcrypt hashing before storage for maximum security.
+    Validates input, checks for existing users, hashes password with bcrypt,
+    and stores securely in database.
     
     Args:
-        user: User registration data with pre-hashed password
+        user: User registration data with plaintext password
         db: Database session dependency
         
     Returns:
         UserResponse: Created user information (without password)
         
     Raises:
-        HTTPException: 400 if email or username already exists
+        HTTPException: 400 if validation fails or user already exists
     """
+    if len(user.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long"
+        )
+    
+    if not re.search(r"[A-Z]", user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must contain at least one uppercase letter"
+        )
+    
+    if not re.search(r"[a-z]", user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must contain at least one lowercase letter"
+        )
+    
+    if not re.search(r"\d", user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must contain at least one number"
+        )
+    
+    if len(user.username) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username must be at least 3 characters long"
+        )
+    
     existing_user = get_user_by_email(db, user.email)
     if existing_user:
         raise HTTPException(
@@ -98,7 +110,8 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
             detail="Username already taken"
         )
     
-    db_user = create_user(db, user.email, user.username, user.password_hash)
+    db_user = create_user(db, user.email, user.username, user.password)
+    user.password = None
     return UserResponse.from_orm(db_user)
 
 
@@ -107,11 +120,11 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT access token.
     
-    Expects a client-side PBKDF2 hashed password for authentication.
-    Returns a JWT token that can be used for accessing protected endpoints.
+    Accepts plaintext password, verifies against stored bcrypt hash,
+    and returns JWT token for accessing protected endpoints.
     
     Args:
-        user_credentials: Login credentials with pre-hashed password
+        user_credentials: Login credentials with plaintext password
         db: Database session dependency
         
     Returns:
@@ -120,7 +133,8 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     Raises:
         HTTPException: 401 if credentials are invalid
     """
-    user = authenticate_user(db, user_credentials.email, user_credentials.password_hash)
+    user = authenticate_user(db, user_credentials.email, user_credentials.password)
+    user_credentials.password = None
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

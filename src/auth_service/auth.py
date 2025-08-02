@@ -1,9 +1,9 @@
 """
 Authentication utilities and password management for the auth service.
 
-This module provides secure authentication functions including double password
-hashing (client-side PBKDF2 + server-side bcrypt), JWT token management, and
-user account operations. Implements defense-in-depth security principles.
+This module provides secure authentication functions including server-side bcrypt
+password hashing with strong validation, JWT token management, and user account
+operations. Implements secure password handling and memory safety principles.
 """
 
 from datetime import datetime, timedelta
@@ -14,8 +14,6 @@ from sqlalchemy.orm import Session
 from .models import User, TokenData
 from .database import get_db
 import os
-import hashlib
-import secrets
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,38 +25,33 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def verify_password_hash(client_hash: str, stored_hash: str) -> bool:
+def verify_password(password: str, stored_hash: str) -> bool:
     """
-    Verify client-side hashed password against stored server hash.
-    
-    Implements double hashing security: client sends PBKDF2 hash, server
-    verifies against bcrypt hash of the client hash.
+    Verify plaintext password against stored bcrypt hash.
     
     Args:
-        client_hash: PBKDF2 hash received from client
+        password: Plaintext password from client
         stored_hash: bcrypt hash stored in database
         
     Returns:
         bool: True if password is valid, False otherwise
     """
-    return pwd_context.verify(client_hash, stored_hash)
+    return pwd_context.verify(password, stored_hash)
 
 
-def get_password_hash(client_hash: str) -> str:
+def get_password_hash(password: str) -> str:
     """
-    Hash the client-provided hash for secure storage.
+    Hash plaintext password with bcrypt for secure storage.
     
-    Takes the client's PBKDF2 hash and applies bcrypt for storage.
-    This double hashing ensures passwords are never stored in plaintext
-    and adds protection against rainbow table attacks.
+    Uses bcrypt with salt rounds=12 for strong password hashing.
     
     Args:
-        client_hash: PBKDF2 hash received from client
+        password: Plaintext password from client
         
     Returns:
         str: bcrypt hash suitable for database storage
     """
-    return pwd_context.hash(client_hash)
+    return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -138,16 +131,16 @@ def get_user_by_username(db: Session, username: str) -> Optional[User]:
     return db.query(User).filter(User.username == username).first()
 
 
-def authenticate_user(db: Session, email: str, client_password_hash: str) -> Optional[User]:
+def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     """
-    Authenticate a user using email and pre-hashed password.
+    Authenticate a user using email and plaintext password.
     
-    Verifies the client's PBKDF2 hash against the stored bcrypt hash.
+    Verifies the plaintext password against the stored bcrypt hash.
     
     Args:
         db: Database session
         email: User's email address
-        client_password_hash: PBKDF2 hash from client
+        password: Plaintext password from client
         
     Returns:
         Optional[User]: User object if authentication succeeds, None otherwise
@@ -155,22 +148,22 @@ def authenticate_user(db: Session, email: str, client_password_hash: str) -> Opt
     user = get_user_by_email(db, email)
     if not user:
         return None
-    if not verify_password_hash(client_password_hash, user.hashed_password):
+    if not verify_password(password, user.hashed_password):
         return None
     return user
 
 
-def create_user(db: Session, email: str, username: str, client_password_hash: str) -> User:
+def create_user(db: Session, email: str, username: str, password: str) -> User:
     """
-    Create a new user account with pre-hashed password.
+    Create a new user account with plaintext password.
     
-    Takes the client's PBKDF2 hash and stores it with bcrypt hashing.
+    Takes the plaintext password and hashes it with bcrypt for storage.
     
     Args:
         db: Database session
         email: User's email address
         username: User's chosen username
-        client_password_hash: PBKDF2 hash from client
+        password: Plaintext password from client
         
     Returns:
         User: Newly created user object
@@ -178,7 +171,7 @@ def create_user(db: Session, email: str, username: str, client_password_hash: st
     Raises:
         SQLAlchemyError: If database constraints are violated
     """
-    hashed_password = get_password_hash(client_password_hash)
+    hashed_password = get_password_hash(password)
     db_user = User(
         email=email,
         username=username,
@@ -190,36 +183,3 @@ def create_user(db: Session, email: str, username: str, client_password_hash: st
     return db_user
 
 
-def get_salt() -> str:
-    """
-    Generate a cryptographically secure random salt.
-    
-    Used by clients for PBKDF2 password hashing before transmission.
-    
-    Returns:
-        str: 64-character hexadecimal salt string
-    """
-    return secrets.token_hex(32)
-
-
-def hash_password_client_side(password: str, salt: str) -> str:
-    """
-    Reference implementation for client-side password hashing.
-    
-    This function demonstrates how clients should hash passwords before
-    sending them to the server. Clients should implement this logic
-    locally, not call this endpoint.
-    
-    Args:
-        password: Plain text password
-        salt: Cryptographic salt from get_salt()
-        
-    Returns:
-        str: PBKDF2 hash suitable for transmission
-        
-    Security Note:
-        This function should only be used for reference. Actual password
-        hashing should happen on the client side to prevent plaintext
-        transmission.
-    """
-    return hashlib.pbkdf2_hex(password.encode('utf-8'), salt.encode('utf-8'), 100000, 64)

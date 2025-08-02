@@ -80,8 +80,8 @@ services:
       context: ./src/auth_service
       dockerfile: Dockerfile
     container_name: auth-service
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     environment:
       - AUTH_DATABASE_URL=postgresql://auth_user:auth_password@auth-postgres:5432/auth_db
       - AUTH_REDIS_URL=redis://auth-redis:6379/1
@@ -94,6 +94,32 @@ services:
       auth-redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - microservices-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Auth Service Nginx Reverse Proxy
+  auth-nginx:
+    build:
+      context: ./src/auth_service/nginx
+      dockerfile: Dockerfile
+    container_name: auth-nginx
+    ports:
+      - "8443:443"
+      - "8080:80"
+    environment:
+      - ENVIRONMENT=production
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - auth_nginx_certs:/etc/nginx/certs
+      - auth_nginx_logs:/var/log/nginx
     networks:
       - microservices-network
 
@@ -127,6 +153,8 @@ volumes:
   gateway_postgres_data:
   auth_redis_data:
   gateway_redis_data:
+  auth_nginx_certs:
+  auth_nginx_logs:
 
 networks:
   microservices-network:

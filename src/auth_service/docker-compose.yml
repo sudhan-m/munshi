@@ -38,14 +38,14 @@ services:
   auth-service:
     build: .
     container_name: auth-service
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     environment:
       - AUTH_DATABASE_URL=postgresql://auth_user:auth_password@auth-postgres:5432/auth_db
       - AUTH_REDIS_URL=redis://auth-redis:6379/1
       - JWT_SECRET_KEY=auth_service_production_secret_key_change_this
-      - ENVIRONMENT=production
-      - DEBUG=false
+      - ENVIRONMENT=development
+      - DEBUG=true
     depends_on:
       auth-postgres:
         condition: service_healthy
@@ -54,10 +54,37 @@ services:
     restart: unless-stopped
     networks:
       - auth-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  auth-nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: auth-nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      - ENVIRONMENT=development
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - auth_nginx_certs:/etc/nginx/certs
+      - auth_nginx_logs:/var/log/nginx
+    networks:
+      - auth-network
 
 volumes:
   auth_postgres_data:
   auth_redis_data:
+  auth_nginx_certs:
+  auth_nginx_logs:
 
 networks:
   auth-network:

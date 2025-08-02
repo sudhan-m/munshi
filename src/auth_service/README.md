@@ -1,6 +1,8 @@
 # Authentication Service - Beginner's Guide
 
-A secure, production-ready authentication microservice built with Python FastAPI. This guide will walk you through every concept, library, and security principle used in this service.
+A secure, production-ready authentication microservice built with Python FastAPI and Nginx reverse proxy. This guide will walk you through every concept, library, and security principle used in this service.
+
+**Updated Security Model**: This service now implements server-side bcrypt password hashing with plaintext password transmission over HTTPS via Nginx reverse proxy, following modern authentication best practices.
 
 ## 📚 Table of Contents
 
@@ -37,12 +39,16 @@ Instead of having every application handle user logins, we create one specialize
 ```mermaid
 graph TB
     subgraph "Authentication Service"
-        API[FastAPI Web Server<br/>Port 8001]
+        NGINX[Nginx Reverse Proxy<br/>HTTPS Port 443]
+        API[FastAPI Web Server<br/>HTTP Port 8001]
         DB[(PostgreSQL Database<br/>auth_db:5433)]
         REDIS[(Redis Cache<br/>Port 6380)]
-        AUTH[Password Security<br/>Double Hashing]
+        AUTH[Password Security<br/>Bcrypt Hashing]
         JWT[JWT Token System<br/>Authentication]
+        SSL[SSL/TLS Termination<br/>Rate Limiting]
         
+        NGINX --> API
+        NGINX --> SSL
         API --> DB
         API --> REDIS
         API --> AUTH
@@ -54,31 +60,34 @@ graph TB
     CLIENT[Client Applications<br/>Web, Mobile, Desktop]
     GATEWAY[API Gateway<br/>Port 8000]
     
-    CLIENT --> API
-    GATEWAY --> API
+    CLIENT --> NGINX
+    GATEWAY --> NGINX
     
+    style NGINX fill:#ff9800
     style API fill:#e1f5fe
     style DB fill:#f3e5f5
     style REDIS fill:#fff3e0
     style AUTH fill:#e8f5e8
     style JWT fill:#fce4ec
+    style SSL fill:#ffeb3b
 ```
 
 ### Key Components:
 
-1. **FastAPI Web Server**: Handles HTTP requests and responses
-2. **PostgreSQL Database**: Stores user accounts and authentication data
-3. **Redis Cache**: Stores temporary data for faster access
-4. **JWT Token System**: Creates and validates digital authentication tokens
-5. **Password Security**: Double-layer password protection
+1. **Nginx Reverse Proxy**: HTTPS termination, rate limiting, and security headers
+2. **FastAPI Web Server**: Handles HTTP requests and responses (internal)
+3. **PostgreSQL Database**: Stores user accounts and authentication data
+4. **Redis Cache**: Stores temporary data for faster access
+5. **JWT Token System**: Creates and validates digital authentication tokens
+6. **SSL/TLS Security**: Strong encryption and certificate management
 
 ## Security Concepts Explained
 
-### 🔐 Password Security: Double Hashing
+### 🔐 Password Security: Server-Side Bcrypt Hashing
 
-**The Problem**: Passwords should never be stored in plain text or transmitted over the internet as plain text.
+**The Problem**: Passwords should never be stored in plain text in the database.
 
-**Our Solution**: We use a "double hashing" approach:
+**Our Solution**: We use server-side bcrypt hashing with strong validation:
 
 ```mermaid
 sequenceDiagram
@@ -88,57 +97,57 @@ sequenceDiagram
     participant DB as Database
     
     User->>Client: Enter password: "mypassword123"
-    Client->>Server: GET /auth/salt
-    Server-->>Client: { "salt": "random64chars..." }
     
-    Note over Client: Client-side PBKDF2 hashing
-    Client->>Client: hash = pbkdf2("mypassword123", salt, 100000)
+    Client->>Server: POST /auth/register<br/>{ email, username, password: "mypassword123" }
     
-    Client->>Server: POST /auth/register<br/>{ password_hash: hash }
+    Note over Server: Server validates input
+    Server->>Server: Validate email format, password strength
+    Server->>Server: Check email/username uniqueness
     
     Note over Server: Server-side bcrypt hashing
-    Server->>Server: stored_hash = bcrypt(hash)
-    Server->>DB: Store user with stored_hash
+    Server->>Server: hash = bcrypt(password, salt_rounds=12)
+    Server->>Server: Clear password from memory
+    Server->>DB: Store user with bcrypt hash
     
     DB-->>Server: User created
-    Server-->>Client: User info (no password)
+    Server-->>Client: { success: true, message: "Account created" }
     
 ```
 
-#### Step 1: Client-Side Hashing (PBKDF2)
+#### Server-Side Validation and Hashing
 ```python
-# Client does this BEFORE sending to server
-import hashlib
-password = "user_password"
-salt = "random_salt_from_server"
-client_hash = hashlib.pbkdf2_hex(password.encode(), salt.encode(), 100000, 64)
-# Result: "a1b2c3d4e5f6..." (64 character hash)
-```
+# Server validates password strength
+if len(password) < 8:
+    raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+if not re.search(r"[A-Z]", password):
+    raise HTTPException(status_code=400, detail="Password must contain uppercase letter")
+if not re.search(r"[a-z]", password):
+    raise HTTPException(status_code=400, detail="Password must contain lowercase letter")
+if not re.search(r"\d", password):
+    raise HTTPException(status_code=400, detail="Password must contain at least one number")
 
-**Why PBKDF2?**
-- **Slow by design**: Takes significant time to compute, making brute force attacks impractical
-- **Salt-based**: Each password gets a unique random salt, preventing rainbow table attacks
-- **Configurable iterations**: 100,000 iterations make it very expensive to crack
-
-#### Step 2: Server-Side Hashing (bcrypt)
-```python
-# Server does this when storing the password
+# Server hashes password with bcrypt (salt_rounds=12)
 from passlib.context import CryptContext
-pwd_context = CryptContext(schemes=["bcrypt"])
-stored_hash = pwd_context.hash(client_hash)
-# Result: "$2b$12$xyz..." (bcrypt hash of the client hash)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+stored_hash = pwd_context.hash(password)
+# Result: "$2b$12$xyz..." (bcrypt hash with embedded salt)
+
+# Clear password from memory
+password = None
 ```
 
 **Why bcrypt?**
-- **Adaptive**: Can increase difficulty over time as computers get faster
-- **Salt included**: Automatically generates and includes salt in the hash
+- **Adaptive**: Can increase difficulty over time as computers get faster (salt rounds=12)
+- **Salt included**: Automatically generates and includes unique salt in each hash
 - **Proven secure**: Battle-tested algorithm used by major companies
+- **Memory-hard**: Resistant to GPU-based attacks
 
-#### Why Double Hashing?
-1. **Defense in depth**: Two layers of protection
-2. **Network security**: No plain text passwords on the network
-3. **Database security**: Even if database is compromised, passwords are double-protected
-4. **Future-proof**: Can upgrade either layer independently
+#### Why Server-Side Hashing?
+1. **Simplicity**: Eliminates complex client-side hashing requirements
+2. **Standardization**: Follows modern authentication best practices
+3. **Security**: bcrypt with salt rounds=12 provides excellent protection
+4. **Validation**: Server can enforce password strength policies
+5. **Memory Safety**: Passwords are cleared from memory after hashing
 
 ### 🎫 JWT Tokens Explained
 
@@ -298,44 +307,19 @@ CREATE TABLE users (
 
 ## API Endpoints Tutorial
 
-### 1. Get Salt for Password Hashing
-
-**Endpoint**: `GET /auth/salt`
-
-**Purpose**: Get a cryptographic salt for client-side password hashing
-
-```bash
-curl -X GET "http://localhost:8001/auth/salt"
-```
-
-**Response**:
-```json
-{
-  "salt": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
-}
-```
-
-**What happens**:
-1. Server generates a random 64-character salt
-2. Client uses this salt to hash their password with PBKDF2
-3. Client sends the hashed password (not plain text) to server
-
-### 2. Register New User
+### 1. Register New User
 
 **Endpoint**: `POST /auth/register`
 
-**Purpose**: Create a new user account
+**Purpose**: Create a new user account with server-side password hashing
 
 ```bash
-# First, hash the password client-side:
-# password_hash = pbkdf2_hex("my_password", salt, 100000, 64)
-
 curl -X POST "http://localhost:8001/auth/register" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
     "username": "john_doe",
-    "password_hash": "client_hashed_password_here"
+    "password": "MySecurePass123"
   }'
 ```
 
@@ -352,13 +336,16 @@ curl -X POST "http://localhost:8001/auth/register" \
 ```
 
 **What happens**:
-1. Server validates email format and uniqueness
-2. Server checks username uniqueness
-3. Server applies bcrypt to the client's password hash
-4. User account is created in database
-5. User information (without password) is returned
+1. Server validates email format (via Pydantic EmailStr)
+2. Server validates password strength (min 8 chars, uppercase, lowercase, number)
+3. Server validates username (min 3 characters)
+4. Server checks email and username uniqueness
+5. Server hashes password with bcrypt (salt rounds=12)
+6. Server clears password from memory
+7. User account is created in database
+8. User information (without password) is returned
 
-### 3. User Login
+### 2. User Login
 
 **Endpoint**: `POST /auth/login`
 
@@ -369,7 +356,7 @@ curl -X POST "http://localhost:8001/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
-    "password_hash": "client_hashed_password_here"
+    "password": "MySecurePass123"
   }'
 ```
 
@@ -383,11 +370,12 @@ curl -X POST "http://localhost:8001/auth/login" \
 
 **What happens**:
 1. Server finds user by email
-2. Server verifies client password hash against stored bcrypt hash
-3. If valid, server creates JWT token with user's email and expiration
-4. Token is returned to client
+2. Server verifies plaintext password against stored bcrypt hash
+3. Server clears password from memory
+4. If valid, server creates JWT token with user's email and expiration
+5. Token is returned to client
 
-### 4. Verify Token
+### 3. Verify Token
 
 **Endpoint**: `GET /auth/verify`
 
@@ -406,7 +394,7 @@ curl -X GET "http://localhost:8001/auth/verify" \
 }
 ```
 
-### 5. Get Current User
+### 4. Get Current User
 
 **Endpoint**: `GET /auth/me`
 
@@ -463,11 +451,16 @@ docker-compose up -d auth-postgres auth-redis
 
 #### 4. Run the Service
 ```bash
+# Option 1: With HTTPS reverse proxy (recommended)
+docker-compose up -d
+
+# Option 2: Direct HTTP (development only)
 python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 #### 5. Test the API
-Visit: http://localhost:8001/docs
+**With HTTPS (recommended):** Visit: https://localhost/docs
+**Direct HTTP:** Visit: http://localhost:8001/docs
 
 This opens the **Swagger UI** where you can:
 - See all available endpoints
@@ -479,13 +472,14 @@ This opens the **Swagger UI** where you can:
 
 ### ✅ What We Do Right
 
-1. **No Plain Text Passwords**: Ever. Anywhere.
-2. **Double Hashing**: Client-side + server-side protection
-3. **Unique Salts**: Each password gets its own random salt
+1. **No Plain Text Passwords**: Ever stored in database
+2. **Strong Password Validation**: Enforced strength requirements
+3. **Bcrypt Hashing**: Salt rounds=12 with automatic unique salts
 4. **JWT Expiration**: Tokens expire after 30 minutes by default
 5. **Input Validation**: All requests are validated before processing
-6. **Database Isolation**: Auth service has its own dedicated database
-7. **Environment Variables**: Sensitive config stored in environment variables
+6. **Memory Safety**: Passwords cleared from memory after processing
+7. **Database Isolation**: Auth service has its own dedicated database
+8. **Environment Variables**: Sensitive config stored in environment variables
 
 ### ⚠️ Production Considerations
 
@@ -501,76 +495,53 @@ This opens the **Swagger UI** where you can:
 
 ### Manual Testing with curl
 
-#### 1. Get a salt
+#### 1. Register user (HTTPS)
 ```bash
-curl -X GET "http://localhost:8001/auth/salt"
-```
-
-#### 2. Hash password client-side (Python example)
-```python
-import hashlib
-password = "test123"
-salt = "salt_from_step_1"
-password_hash = hashlib.pbkdf2_hex(password.encode(), salt.encode(), 100000, 64)
-print(password_hash)
-```
-
-#### 3. Register user
-```bash
-curl -X POST "http://localhost:8001/auth/register" \
+curl -X POST "https://localhost/auth/register" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
     "username": "testuser",
-    "password_hash": "YOUR_HASHED_PASSWORD"
+    "password": "TestPass123"
   }'
 ```
 
-#### 4. Login
+#### 2. Login (HTTPS)
 ```bash
-curl -X POST "http://localhost:8001/auth/login" \
+curl -X POST "https://localhost/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
-    "password_hash": "YOUR_HASHED_PASSWORD"
+    "password": "TestPass123"
   }'
 ```
 
 ### Testing with Python
 
 ```python
-import hashlib
 import requests
 
-# 1. Get salt
-response = requests.get("http://localhost:8001/auth/salt")
-salt = response.json()["salt"]
-
-# 2. Hash password
-password = "test123"
-password_hash = hashlib.pbkdf2_hex(password.encode(), salt.encode(), 100000, 64)
-
-# 3. Register
+# 1. Register (HTTPS)
 register_data = {
     "email": "test@example.com",
     "username": "testuser",
-    "password_hash": password_hash
+    "password": "TestPass123"
 }
-response = requests.post("http://localhost:8001/auth/register", json=register_data)
+response = requests.post("https://localhost/auth/register", json=register_data, verify=False)
 print("Register:", response.json())
 
-# 4. Login
+# 2. Login (HTTPS)
 login_data = {
     "email": "test@example.com",
-    "password_hash": password_hash
+    "password": "TestPass123"
 }
-response = requests.post("http://localhost:8001/auth/login", json=login_data)
+response = requests.post("https://localhost/auth/login", json=login_data, verify=False)
 token = response.json()["access_token"]
 print("Token:", token)
 
-# 5. Use token
+# 3. Use token (HTTPS)
 headers = {"Authorization": f"Bearer {token}"}
-response = requests.get("http://localhost:8001/auth/me", headers=headers)
+response = requests.get("https://localhost/auth/me", headers=headers, verify=False)
 print("User info:", response.json())
 ```
 
@@ -608,9 +579,9 @@ pip install -r requirements.txt
 ### Issue: Password validation fails
 **Problem**: Login fails with correct password
 **Solutions**:
-1. Verify password is hashed client-side with correct salt
-2. Check PBKDF2 parameters: 100,000 iterations, 64-byte output
-3. Ensure same salt is used for registration and login
+1. Verify password meets strength requirements (8+ chars, upper, lower, number)
+2. Check that you're sending the plaintext password, not a hash
+3. Ensure password was not modified during transmission
 
 ## Understanding the Code Flow
 
@@ -622,15 +593,14 @@ sequenceDiagram
     participant A as Auth Service
     participant D as Database
     
-    C->>A: GET /auth/salt
-    A-->>C: { salt: "random64chars" }
+    C->>A: POST /auth/register<br/>{ email, username, password }
     
-    Note over C: hash = pbkdf2(password, salt, 100000)
-    
-    C->>A: POST /auth/register<br/>{ email, username, password_hash }
-    
-    A->>A: Validate email/username uniqueness
-    A->>A: bcrypt_hash = bcrypt(password_hash)
+    A->>A: Validate email format (Pydantic EmailStr)
+    A->>A: Validate password strength (8+ chars, upper, lower, number)
+    A->>A: Validate username length (3+ chars)
+    A->>A: Check email/username uniqueness
+    A->>A: bcrypt_hash = bcrypt(password, salt_rounds=12)
+    A->>A: Clear password from memory
     A->>D: INSERT user with bcrypt_hash
     D-->>A: User created successfully
     A-->>C: { id, email, username, is_active, created_at }
@@ -645,14 +615,13 @@ sequenceDiagram
     participant A as Auth Service
     participant D as Database
     
-    Note over C: hash = pbkdf2(password, salt, 100000)
-    
-    C->>A: POST /auth/login<br/>{ email, password_hash }
+    C->>A: POST /auth/login<br/>{ email, password }
     
     A->>D: SELECT user WHERE email = ?
     D-->>A: User record with bcrypt_hash
     
-    A->>A: verify(password_hash, bcrypt_hash)
+    A->>A: verify(password, bcrypt_hash)
+    A->>A: Clear password from memory
     
     alt Authentication Success
         A->>A: jwt_token = create_jwt(email, expiration)
@@ -687,7 +656,7 @@ sequenceDiagram
     
 ```
 
-This authentication service provides a solid foundation for secure user management in a microservices architecture. The double hashing approach ensures maximum password security, while JWT tokens provide stateless authentication suitable for distributed systems.
+This authentication service provides a solid foundation for secure user management in a microservices architecture. The server-side bcrypt hashing with strong validation ensures excellent password security, while JWT tokens provide stateless authentication suitable for distributed systems.
 
 ## Next Steps
 

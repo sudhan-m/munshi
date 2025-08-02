@@ -49,31 +49,30 @@ class UserCreate(BaseModel):
     """
     Pydantic model for user registration requests.
     
-    Expects a pre-hashed password from the client to ensure no plaintext
-    passwords are transmitted over the network.
+    Accepts plaintext password which will be hashed server-side with bcrypt.
     
     Attributes:
         email: Valid email address for the new account
         username: Unique username for the account
-        password_hash: Client-side PBKDF2 hashed password
+        password: Plaintext password (will be hashed server-side)
     """
     email: EmailStr
     username: str
-    password_hash: str
+    password: str
 
 
 class UserLogin(BaseModel):
     """
     Pydantic model for user login requests.
     
-    Expects a pre-hashed password from the client for secure authentication.
+    Accepts plaintext password for server-side verification.
     
     Attributes:
         email: Email address for authentication
-        password_hash: Client-side PBKDF2 hashed password
+        password: Plaintext password for authentication
     """
     email: EmailStr
-    password_hash: str
+    password: str
 
 
 class UserResponse(BaseModel):

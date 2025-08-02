@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  gateway-postgres:
+    image: postgres:15
+    container_name: gateway-postgres
+    environment:
+      POSTGRES_DB: gateway_db
+      POSTGRES_USER: gateway_user
+      POSTGRES_PASSWORD: gateway_password
+    ports:
+      - "5434:5432"
+    volumes:
+      - gateway_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_user -d gateway_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - gateway-network
+
+  gateway-redis:
+    image: redis:7-alpine
+    container_name: gateway-redis
+    ports:
+      - "6381:6379"
+    volumes:
+      - gateway_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - gateway-network
+
+  api-gateway:
+    build: .
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - GATEWAY_DATABASE_URL=postgresql://gateway_user:gateway_password@gateway-postgres:5432/gateway_db
+      - GATEWAY_REDIS_URL=redis://gateway-redis:6379/0
+      - AUTH_SERVICE_URL=http://host.docker.internal:8001
+      - ENVIRONMENT=production
+      - DEBUG=false
+    depends_on:
+      gateway-postgres:
+        condition: service_healthy
+      gateway-redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - gateway-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  gateway_postgres_data:
+  gateway_redis_data:
+
+networks:
+  gateway-network:
+    driver: bridge

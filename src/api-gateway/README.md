@@ -516,11 +516,6 @@ sequenceDiagram
     G->>U: GET /profile<br/>X-User-Email: user@example.com<br/>X-User-ID: 123
     U-->>G: User profile data
     G-->>C: User profile data
-    
-    style C fill:#fff3e0
-    style G fill:#e1f5fe
-    style A fill:#e8f5e8
-    style U fill:#f3e5f5
 ```
 
 ## Setting Up Development Environment
@@ -611,9 +606,6 @@ sequenceDiagram
     Note over G: Transform response:<br/>- Add metadata<br/>- Format timestamps<br/>- Remove internal fields
     
     G-->>C: { "data": { "id": 123, "name": "John Doe" }, "meta": { "correlation_id": "abc123" } }
-    
-    style G fill:#e1f5fe
-    style S fill:#e8f5e8
 ```
 
 ### 🚦 Load Balancing
@@ -670,11 +662,6 @@ sequenceDiagram
         S2-->>G: 200 OK { "status": "healthy" }
         G->>DB: UPDATE service SET is_active=true, last_health_check=now()
     end
-    
-    style G fill:#e1f5fe
-    style S1 fill:#ffebee
-    style S2 fill:#e8f5e8
-    style DB fill:#f3e5f5
 ```
 
 ## Testing the Service

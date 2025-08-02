@@ -103,9 +103,6 @@ sequenceDiagram
     DB-->>Server: User created
     Server-->>Client: User info (no password)
     
-    style Client fill:#e3f2fd
-    style Server fill:#e8f5e8
-    style DB fill:#f3e5f5
 ```
 
 #### Step 1: Client-Side Hashing (PBKDF2)
@@ -638,9 +635,6 @@ sequenceDiagram
     D-->>A: User created successfully
     A-->>C: { id, email, username, is_active, created_at }
     
-    style C fill:#e3f2fd
-    style A fill:#e8f5e8
-    style D fill:#f3e5f5
 ```
 
 ### Login Flow
@@ -667,9 +661,6 @@ sequenceDiagram
         A-->>C: 401 Unauthorized
     end
     
-    style C fill:#e3f2fd
-    style A fill:#e8f5e8
-    style D fill:#f3e5f5
 ```
 
 ### Token Verification Flow
@@ -694,9 +685,6 @@ sequenceDiagram
         G-->>C: 401 Unauthorized
     end
     
-    style C fill:#e3f2fd
-    style A fill:#e8f5e8
-    style G fill:#fff3e0
 ```
 
 This authentication service provides a solid foundation for secure user management in a microservices architecture. The double hashing approach ensures maximum password security, while JWT tokens provide stateless authentication suitable for distributed systems.

@@ -113,13 +113,21 @@ graph TB
     CIRCUIT --> ORDER_SVC
     CIRCUIT --> PAYMENT_SVC
     
-    style ROUTER fill:#e1f5fe
-    style AUTH_MW fill:#e8f5e8
-    style RATE_LIMITER fill:#fff3e0
-    style LOGGER fill:#f3e5f5
-    style CIRCUIT fill:#fce4ec
-    style GW_DB fill:#f3e5f5
-    style GW_REDIS fill:#fff3e0
+    classDef router fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef auth fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef performance fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef logging fill:#f3e5f5,stroke:#333,stroke-width:2px
+    classDef circuit fill:#fce4ec,stroke:#333,stroke-width:2px
+    classDef database fill:#f3e5f5,stroke:#333,stroke-width:2px
+    classDef redis fill:#fff3e0,stroke:#333,stroke-width:2px
+    
+    class ROUTER router
+    class AUTH_MW auth
+    class RATE_LIMITER,CACHE_MW performance
+    class LOGGER logging
+    class CIRCUIT circuit
+    class GW_DB database
+    class GW_REDIS redis
 ```
 
 ### Key Components:
@@ -158,11 +166,6 @@ sequenceDiagram
     GW->>SVC: GET http://user-service:8002/profile
     SVC-->>GW: User profile data
     GW-->>CLIENT: User profile data
-    
-    style SVC fill:#e8f5e8
-    style GW fill:#e1f5fe
-    style DB fill:#f3e5f5
-    style CLIENT fill:#fff3e0
 ```
 
 ### 🛡️ Authentication Flow
@@ -193,11 +196,6 @@ sequenceDiagram
         AUTH-->>GW: 401 Unauthorized
         GW-->>CLIENT: 401 Unauthorized
     end
-    
-    style CLIENT fill:#fff3e0
-    style GW fill:#e1f5fe
-    style AUTH fill:#e8f5e8
-    style BACKEND fill:#f3e5f5
 ```
 
 ### ⚡ Rate Limiting
@@ -221,11 +219,15 @@ flowchart TD
     EXPIRED -->|Yes| RESET[Reset Counter]
     RESET --> INCREMENT
     
-    style REQUEST fill:#e1f5fe
-    style WITHIN fill:#fff3e0
-    style INCREMENT fill:#e8f5e8
-    style REJECT fill:#ffebee
-    style FORWARD fill:#e8f5e8
+    classDef request fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef decision fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef success fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef error fill:#ffebee,stroke:#333,stroke-width:2px
+    
+    class REQUEST request
+    class WITHIN,EXPIRED decision
+    class INCREMENT,FORWARD,RESPONSE,RESET success
+    class REJECT error
 ```
 
 ### 🔄 Circuit Breaker Pattern
@@ -344,9 +346,15 @@ flowchart TD
     CACHE_STORE --> HTML
     CACHE_STORE --> PLAIN
     
-    style RETURN_CACHED fill:#e8f5e8
-    style RETURN_FRESH fill:#fff3e0
-    style RETURN_ERROR fill:#ffcdd2
+    classDef cached fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef fresh fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef error fill:#ffcdd2,stroke:#333,stroke-width:2px
+    classDef ttl fill:#e1f5fe,stroke:#333,stroke-width:1px
+    
+    class RETURN_CACHED cached
+    class RETURN_FRESH,CACHE_STORE fresh
+    class RETURN_ERROR error
+    class JSON,HTML,PLAIN ttl
 ```
 
 **Cache Intelligence:**
@@ -826,9 +834,15 @@ flowchart TD
     INSTANCE2 --> RESPONSE
     INSTANCE3 --> RESPONSE
     
-    style GATEWAY fill:#e1f5fe
-    style STRATEGY fill:#fff3e0
-    style RESPONSE fill:#e8f5e8
+    classDef gateway fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef strategy fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef response fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef instance fill:#f3e5f5,stroke:#333,stroke-width:1px
+    
+    class GATEWAY gateway
+    class STRATEGY,RR,LC,RAND strategy
+    class RESPONSE response
+    class INSTANCE1,INSTANCE2,INSTANCE3 instance
 ```
 
 ### 🔧 Health Monitoring
@@ -1046,9 +1060,15 @@ flowchart TD
     RESPONSE --> CACHE_STORE[Store in Cache with TTL]
     CACHE_STORE --> RETURN_RESPONSE[Return Response]
     
-    style CACHE_CHECK fill:#fff3e0
-    style RETURN_CACHED fill:#e8f5e8
-    style CACHE_STORE fill:#e1f5fe
+    classDef check fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef cached fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef store fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef normal fill:#f9f9f9,stroke:#333,stroke-width:1px
+    
+    class CACHE_CHECK check
+    class RETURN_CACHED cached
+    class CACHE_STORE,RETURN_RESPONSE store
+    class REQUEST,FORWARD,BACKEND,RESPONSE normal
 ```
 
 ### 📊 Monitoring and Metrics

@@ -39,6 +39,11 @@ Instead of having every application handle user logins, we create one specialize
 
 ```mermaid
 graph TB
+    subgraph "External Access"
+        CLIENT[Client Applications<br/>Web, Mobile, Desktop]
+        GATEWAY[API Gateway<br/>mTLS Port 8000]
+    end
+    
     subgraph "Authentication Service with Redis Cache"
         CADDY[Caddy Reverse Proxy<br/>HTTPS Port 443]
         API[FastAPI Web Server<br/>HTTP Port 8001]
@@ -75,19 +80,24 @@ graph TB
         LOCKOUT --> LOCK
     end
     
-    CLIENT[Client Applications<br/>Web, Mobile, Desktop]
-    GATEWAY[API Gateway<br/>mTLS Port 8000]
-    
     CLIENT --> CADDY
     GATEWAY --> CADDY
     
-    style CADDY fill:#ff9800
-    style API fill:#e1f5fe
-    style DB fill:#f3e5f5
-    style REDIS fill:#fff3e0
-    style AUTH fill:#e8f5e8
-    style JWT fill:#fce4ec
-    style LOCKOUT fill:#ffcdd2
+    classDef ingress fill:#ff9800,stroke:#333,stroke-width:2px
+    classDef auth fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef database fill:#f3e5f5,stroke:#333,stroke-width:2px
+    classDef redis fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef security fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef tokens fill:#fce4ec,stroke:#333,stroke-width:2px
+    classDef protection fill:#ffcdd2,stroke:#333,stroke-width:2px
+    
+    class CADDY ingress
+    class API,AUTH auth
+    class DB database
+    class REDIS redis
+    class AUTH,BLACKLIST,SESSION,ATTEMPTS,LOCK security
+    class JWT tokens
+    class LOCKOUT protection
 ```
 
 ### Key Components:
@@ -183,9 +193,13 @@ graph LR
     PAYLOAD --> P_DATA["Subject: user email<br/>Expires: timestamp"]
     SIGNATURE --> S_DATA["HMACSHA256 hash"]
     
-    style HEADER fill:#e3f2fd
-    style PAYLOAD fill:#f3e5f5
-    style SIGNATURE fill:#e8f5e8
+    classDef header fill:#e3f2fd,stroke:#333,stroke-width:2px
+    classDef payload fill:#f3e5f5,stroke:#333,stroke-width:2px
+    classDef signature fill:#e8f5e8,stroke:#333,stroke-width:2px
+    
+    class HEADER,H_DATA header
+    class PAYLOAD,P_DATA payload
+    class SIGNATURE,S_DATA signature
 ```
 
 - **Header**: Specifies the algorithm used (HS256)
@@ -277,9 +291,13 @@ flowchart TD
     
     LOCK_ACCOUNT --> DENY
     
-    style SUCCESS fill:#e8f5e8
-    style DENY fill:#ffcdd2
-    style LOCK_ACCOUNT fill:#ffcdd2
+    classDef success fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef deny fill:#ffcdd2,stroke:#333,stroke-width:2px
+    classDef normal fill:#f9f9f9,stroke:#333,stroke-width:1px
+    
+    class SUCCESS,CLEAR success
+    class DENY,LOCK_ACCOUNT deny
+    class LOGIN,CHECK_LOCK,VALIDATE,INCREMENT,COUNT_CHECK,ALLOW_RETRY normal
 ```
 
 **Security Features:**

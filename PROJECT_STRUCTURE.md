@@ -104,12 +104,39 @@ src/api-gateway/
 
 ## Service Communication
 
-```
-Client Request → Caddy Reverse Proxy (Port 443) → API Gateway (Port 8000) → Auth Service (Port 8001)
-                            ↓                              ↓
-                    TLS Termination                 Other Microservices
-                    Request Tracing
-                    Compression
+```mermaid
+graph LR
+    subgraph "Client Layer"
+        CLIENT[Client Applications]
+    end
+    
+    subgraph "Ingress Layer"
+        CADDY[Caddy Reverse Proxy<br/>Port 443<br/>TLS Termination<br/>Request Tracing<br/>Compression]
+    end
+    
+    subgraph "Gateway Layer"
+        GATEWAY[API Gateway<br/>Port 8000<br/>Service Discovery<br/>Rate Limiting<br/>Response Caching]
+    end
+    
+    subgraph "Service Layer"
+        AUTH[Auth Service<br/>Port 8001<br/>JWT Management<br/>User Authentication]
+        OTHER[Other Microservices<br/>Future Services]
+    end
+    
+    CLIENT -->|HTTPS| CADDY
+    CADDY -->|HTTP| GATEWAY
+    GATEWAY -->|mTLS| AUTH
+    GATEWAY -->|HTTP| OTHER
+    
+    classDef client fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef ingress fill:#ff9800,stroke:#333,stroke-width:2px
+    classDef gateway fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef service fill:#e8f5e8,stroke:#333,stroke-width:2px
+    
+    class CLIENT client
+    class CADDY ingress
+    class GATEWAY gateway
+    class AUTH,OTHER service
 ```
 
 ### Enhanced Authentication Flow

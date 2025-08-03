@@ -12,44 +12,93 @@ This project implements a true microservices architecture where each service:
 - Features distributed caching and rate limiting
 - Implements intelligent middleware for performance optimization
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Client Layer                            │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ HTTPS (TLS)
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Caddy Reverse Proxy                         │
-│           (Port 443 - TLS Termination)                     │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  Emergency DDoS Protection, Security Headers        │   │
-│  │  Response Compression, Request Tracing              │   │
-│  └─────────────────────┬───────────────────────────────┘   │
-└────────────────────────┼───────────────────────────────────┘
-                         │ HTTP (Internal)
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   API Gateway                               │
-│                  (Port 8000)                               │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │ Gateway DB  │ │Gateway Redis│ │ Redis Rate Limiting  │   │
-│  │(Port 5434)  │ │(Port 6381)  │ │ Response Caching     │   │
-│  │             │ │             │ │ Service Registry     │   │
-│  │             │ │             │ │ Circuit Breaker      │   │
-│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ mTLS (Mutual TLS)
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Auth Service                                │
-│                (Port 8001)                                 │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │   Auth DB   │ │ Auth Redis  │ │ Token Blacklisting   │   │
-│  │ (Port 5433) │ │ (Port 6380) │ │ User Session Cache   │   │
-│  │             │ │             │ │ Failed Login Track   │   │
-│  │             │ │             │ │ Account Lockout      │   │
-│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "External Access"
+        CLIENT[Client Applications<br/>Web, Mobile, Desktop]
+    end
+    
+    subgraph "Ingress Layer - Port 443"
+        CADDY[Caddy Reverse Proxy<br/>HTTPS TLS Termination<br/>Emergency DDoS Protection<br/>Security Headers]
+    end
+    
+    subgraph "API Gateway - Port 8000"
+        GATEWAY[API Gateway Service<br/>FastAPI Application]
+        GW_DB[(PostgreSQL Database<br/>gateway_db:5434)]
+        GW_REDIS[(Redis Cache<br/>Database 0 - Port 6381)]
+        
+        subgraph "Gateway Features"
+            RATE_LIMIT[Rate Limiting<br/>1000-5000 req/min]
+            RESP_CACHE[Response Caching<br/>5-10 min TTL]
+            SVC_REGISTRY[Service Registry<br/>60s TTL]
+            CIRCUIT_BREAK[Circuit Breaker<br/>Fault Tolerance]
+        end
+    end
+    
+    subgraph "Auth Service - Port 8001"
+        AUTH_SVC[Auth Service<br/>FastAPI Application]
+        AUTH_DB[(PostgreSQL Database<br/>auth_db:5433)]
+        AUTH_REDIS[(Redis Cache<br/>Database 1 - Port 6380)]
+        
+        subgraph "Security Features"
+            TOKEN_BL[JWT Token Blacklisting<br/>Instant Logout]
+            SESSION_CACHE[User Session Cache<br/>1-hour TTL]
+            FAILED_LOGIN[Failed Login Tracking<br/>15-min Window]
+            ACCOUNT_LOCK[Account Lockout<br/>15-min TTL]
+        end
+    end
+    
+    %% Client to Ingress
+    CLIENT -->|HTTPS| CADDY
+    
+    %% Ingress to Gateway
+    CADDY -->|HTTP| GATEWAY
+    
+    %% Gateway to Auth Service (mTLS)
+    GATEWAY -->|mTLS| AUTH_SVC
+    
+    %% Gateway Internal Connections
+    GATEWAY --> GW_DB
+    GATEWAY --> GW_REDIS
+    GATEWAY --> RATE_LIMIT
+    GATEWAY --> RESP_CACHE
+    GATEWAY --> SVC_REGISTRY
+    GATEWAY --> CIRCUIT_BREAK
+    
+    %% Auth Service Internal Connections
+    AUTH_SVC --> AUTH_DB
+    AUTH_SVC --> AUTH_REDIS
+    AUTH_SVC --> TOKEN_BL
+    AUTH_SVC --> SESSION_CACHE
+    AUTH_SVC --> FAILED_LOGIN
+    AUTH_SVC --> ACCOUNT_LOCK
+    
+    %% Redis Feature Connections
+    GW_REDIS --> RATE_LIMIT
+    GW_REDIS --> RESP_CACHE
+    GW_REDIS --> SVC_REGISTRY
+    GW_REDIS --> CIRCUIT_BREAK
+    
+    AUTH_REDIS --> TOKEN_BL
+    AUTH_REDIS --> SESSION_CACHE
+    AUTH_REDIS --> FAILED_LOGIN
+    AUTH_REDIS --> ACCOUNT_LOCK
+    
+    classDef ingress fill:#ff9800,stroke:#333,stroke-width:2px
+    classDef gateway fill:#e1f5fe,stroke:#333,stroke-width:2px
+    classDef auth fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef database fill:#f3e5f5,stroke:#333,stroke-width:2px
+    classDef redis fill:#fff3e0,stroke:#333,stroke-width:2px
+    classDef security fill:#fce4ec,stroke:#333,stroke-width:2px
+    classDef performance fill:#e8f5e8,stroke:#333,stroke-width:2px
+    
+    class CADDY ingress
+    class GATEWAY,GW_DB,RATE_LIMIT,RESP_CACHE,SVC_REGISTRY,CIRCUIT_BREAK gateway
+    class AUTH_SVC,AUTH_DB,TOKEN_BL,SESSION_CACHE,FAILED_LOGIN,ACCOUNT_LOCK auth
+    class GW_DB,AUTH_DB database
+    class GW_REDIS,AUTH_REDIS redis
+    class TOKEN_BL,SESSION_CACHE,FAILED_LOGIN,ACCOUNT_LOCK security
+    class RATE_LIMIT,RESP_CACHE,SVC_REGISTRY,CIRCUIT_BREAK performance
 ```
 
 ## Services

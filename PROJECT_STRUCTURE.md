@@ -8,10 +8,24 @@ This document outlines the complete structure of the Munshi microservices projec
 munshi/
 ├── README.md                           # Main project documentation
 ├── PROJECT_STRUCTURE.md               # This file - project structure guide
-├── docker-compose.microservices.yml   # Complete microservices deployment
-└── src/                               # Source code directory
-    ├── auth_service/                  # Authentication microservice
-    └── api-gateway/                   # API Gateway microservice
+├── LINKERD.md                          # Linkerd service mesh integration guide
+├── DEPLOYMENT.md                       # Comprehensive deployment guide
+├── docker-compose.microservices.yml   # Traditional microservices deployment
+├── docker-compose.linkerd.yml         # Linkerd-compatible development deployment
+├── deploy.sh                           # Universal deployment script
+├── k8s/                               # Kubernetes manifests with Linkerd
+│   ├── namespace.yaml                 # Namespace with Linkerd injection
+│   ├── auth-service.yaml             # Auth service with service mesh
+│   ├── api-gateway.yaml              # API gateway with service mesh
+│   ├── caddy-ingress.yaml            # Caddy ingress controller
+│   ├── linkerd-service-profiles.yaml # Service profiles for traffic management
+│   ├── monitoring.yaml               # Observability configuration
+│   └── *.yaml                        # Database and Redis deployments
+├── linkerd/                          # Linkerd installation and configuration
+│   └── linkerd-install.sh            # Automated Linkerd installation
+└── src/                              # Source code directory
+    ├── auth_service/                 # Authentication microservice
+    └── api-gateway/                  # API Gateway microservice
 ```
 
 ## Authentication Service (`src/auth_service/`)
@@ -178,15 +192,32 @@ graph LR
 
 ## Deployment Options
 
-### 1. Complete Microservices Deployment
+### 1. Kubernetes with Linkerd (Recommended)
+```bash
+./deploy.sh k8s production
+```
+- Automatic mTLS between all services
+- Built-in observability and metrics
+- Service profiles for traffic management
+- Production-ready with high availability
+
+### 2. Complete Microservices Deployment (Traditional)
 ```bash
 docker-compose -f docker-compose.microservices.yml up -d
 ```
-- Deploys all services with separate databases
+- Manual mTLS configuration
 - Services communicate via Docker network
-- Recommended for production
+- Traditional microservices approach
 
-### 2. Independent Service Deployment
+### 3. Linkerd-Compatible Development
+```bash
+./deploy.sh docker development
+```
+- Linkerd-ready service configuration
+- Enhanced observability stack
+- Development-friendly setup
+
+### 4. Independent Service Deployment
 
 **Auth Service Only**:
 ```bash
@@ -200,7 +231,7 @@ cd src/api-gateway
 docker-compose up -d
 ```
 
-### 3. Development Setup
+### 5. Development Setup
 ```bash
 # Auth Service
 cd src/auth_service

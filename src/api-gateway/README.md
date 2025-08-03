@@ -1,11 +1,12 @@
 # API Gateway Service - Beginner's Guide
 
-A secure, production-ready API Gateway microservice built with Python FastAPI and Redis-powered performance features. This guide will walk you through every concept, pattern, and technology used in this intelligent service mesh.
+A secure, production-ready API Gateway microservice built with Python FastAPI, Redis-powered performance features, and Linkerd service mesh integration. This guide will walk you through every concept, pattern, and technology used in this intelligent service mesh.
 
 ## 📚 Table of Contents
 
 - [What is an API Gateway?](#what-is-an-api-gateway)
 - [Architecture Overview](#architecture-overview)
+- [Linkerd Service Mesh Integration](#linkerd-service-mesh-integration)
 - [Core Concepts Explained](#core-concepts-explained)
 - [Redis Performance Features](#redis-performance-features)
 - [Libraries and Technologies](#libraries-and-technologies)
@@ -139,6 +140,59 @@ graph TB
 5. **Circuit Breaker**: Provides fault tolerance when backend services fail
 6. **Service Registry**: Tracks available backend services and their health
 7. **Database & Cache**: Stores operational data and improves performance
+
+## Linkerd Service Mesh Integration
+
+### 🔗 **Service Mesh Benefits for API Gateway**
+
+The API Gateway benefits significantly from Linkerd service mesh integration:
+
+- **🔐 Automatic mTLS**: Secure communication with auth service without manual certificates
+- **📊 Traffic Metrics**: Built-in observability for request routing and service health
+- **🔄 Load Balancing**: Intelligent traffic distribution across service instances
+- **🛡️ Circuit Breaking**: Automatic failure detection and isolation
+- **📈 Retries & Timeouts**: Configurable resilience policies
+
+### **Linkerd-Optimized Client Configuration**
+
+```python
+class ServiceRegistry:
+    def _create_client_config(self):
+        """HTTP client optimized for Linkerd service mesh"""
+        return {
+            "timeout": httpx.Timeout(connect=5.0, read=30.0),
+            "limits": httpx.Limits(
+                max_keepalive_connections=20,
+                max_connections=100
+            ),
+            "verify": True,  # Trust Linkerd's automatic mTLS
+            "headers": {
+                "X-Service-Mesh": "linkerd"
+            }
+        }
+```
+
+### **Service Discovery with Linkerd**
+
+```python
+# Use Linkerd service discovery
+"auth": "http://auth-service.munshi.svc.cluster.local:8001"
+
+# Linkerd handles:
+# - Service resolution
+# - Load balancing
+# - Health checking
+# - Circuit breaking
+```
+
+### **Observability Features**
+
+- **Request Success Rates**: Monitor authentication and routing success
+- **Latency Metrics**: P99 latencies for each route and destination
+- **Service Topology**: Visual map of gateway → service dependencies
+- **Traffic Splitting**: A/B testing and canary deployments
+
+For complete service mesh setup, see [`LINKERD.md`](../../LINKERD.md).
 
 ## Core Concepts Explained
 

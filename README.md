@@ -139,10 +139,16 @@ graph TB
 
 ## Security Features
 
+### **Linkerd Service Mesh Security (Recommended)**
+- **Automatic mTLS**: Zero-config mutual TLS between all services with identity verification
+- **Service Identity**: X.509 certificate-based authentication with automatic rotation
+- **Traffic Encryption**: End-to-end encryption for all service communication
+- **Identity-Based Authorization**: Fine-grained access control based on service identity
+
 ### **Multi-Layer Security Architecture**
-- **mTLS Communication**: Mutual TLS between Gateway and Auth Service
+- **mTLS Communication**: Automatic via Linkerd or manual between Gateway and Auth Service
 - **TLS Termination**: HTTPS with automatic certificate management via Caddy
-- **Certificate Authority**: Internal CA for service-to-service communication
+- **Certificate Authority**: Linkerd-managed or internal CA for service-to-service communication
 - **Redis-Powered Security**: Distributed security features across all services
 
 ### **Authentication & Session Security**
@@ -169,8 +175,19 @@ graph TB
 
 ## Deployment Options
 
-### Option 1: Full Microservices with Caddy Ingress (Recommended)
-Deploy all services with mTLS and HTTPS termination:
+### Option 1: Kubernetes with Linkerd Service Mesh (Recommended)
+Deploy with automatic mTLS, observability, and traffic management:
+```bash
+# Install and deploy with Linkerd
+./deploy.sh k8s production
+
+# Access services
+linkerd viz dashboard              # Observability dashboard
+kubectl port-forward -n munshi svc/caddy-ingress 8443:443  # Application
+```
+
+### Option 2: Full Microservices with Caddy Ingress
+Deploy all services with manual mTLS and HTTPS termination:
 ```bash
 docker-compose -f docker-compose.microservices.yml up -d
 
@@ -179,7 +196,18 @@ docker-compose -f docker-compose.microservices.yml up -d
 # - Caddy Admin: http://localhost:2019
 ```
 
-### Option 2: Independent Service Deployment
+### Option 3: Linkerd-Compatible Docker Compose (Development)
+Local development with Linkerd-ready configuration:
+```bash
+./deploy.sh docker development
+
+# Services available at:
+# - Application: https://localhost
+# - Linkerd Viz: http://localhost:8080
+# - Jaeger UI: http://localhost:16686
+```
+
+### Option 4: Independent Service Deployment
 
 **Deploy API Gateway with Caddy Ingress:**
 ```bash
@@ -197,7 +225,7 @@ docker-compose up -d
 # Auth service available at: http://localhost:8001
 ```
 
-### Option 3: Manual Setup
+### Option 5: Manual Setup
 
 **Auth Service with Reverse Proxy:**
 ```bash

@@ -1,6 +1,6 @@
 # Authentication Service - Beginner's Guide
 
-A secure, production-ready authentication microservice built with Python FastAPI, Redis caching, and Caddy reverse proxy. This guide will walk you through every concept, library, and security principle used in this service.
+A secure, production-ready authentication microservice built with Python FastAPI, Redis caching, Linkerd service mesh, and Caddy reverse proxy. This guide will walk you through every concept, library, and security principle used in this service.
 
 **Enhanced Security Model**: This service implements server-side bcrypt password hashing with Redis-powered security features including JWT token blacklisting, user session caching, failed login tracking, and automatic account lockout protection.
 
@@ -8,6 +8,7 @@ A secure, production-ready authentication microservice built with Python FastAPI
 
 - [What is an Authentication Service?](#what-is-an-authentication-service)
 - [Architecture Overview](#architecture-overview)
+- [Linkerd Service Mesh Integration](#linkerd-service-mesh-integration)
 - [Security Concepts Explained](#security-concepts-explained)
 - [Redis Cache Features](#redis-cache-features)
 - [Libraries and Technologies](#libraries-and-technologies)
@@ -108,6 +109,56 @@ graph TB
 4. **Redis Security Cache**: Advanced security features with sub-millisecond performance
 5. **JWT Token System**: Creates, validates, and blacklists digital authentication tokens
 6. **Enhanced Security**: Multi-layered protection with intelligent caching
+
+## Linkerd Service Mesh Integration
+
+### 🔗 **What is Linkerd?**
+
+Linkerd is a service mesh that provides automatic mTLS, observability, and reliability for the auth service. It eliminates the need for manual certificate management and provides enterprise-grade security.
+
+### **Benefits for Authentication Service**
+
+- **🔐 Automatic mTLS**: Zero-config mutual TLS with the API Gateway
+- **📊 Observability**: Built-in metrics for login rates, latency, and success rates
+- **🛡️ Security**: Service identity verification and traffic encryption
+- **⚡ Performance**: Ultra-light proxy with minimal overhead
+
+### **Service Identity Verification**
+
+```python
+@app.middleware("http")
+async def verify_linkerd_client(request: Request, call_next):
+    """Verify client identity via Linkerd service mesh"""
+    linkerd_service = request.headers.get("X-Linkerd-Service-Name")
+    gateway_id = request.headers.get("X-Gateway-ID")
+    
+    # Trust requests through Linkerd with proper identity
+    if linkerd_service == "api-gateway" and gateway_id == "api-gateway":
+        request.state.verified_client = True
+        request.state.service_mesh = "linkerd"
+```
+
+### **Deployment with Linkerd**
+
+```bash
+# Deploy auth service with Linkerd
+kubectl apply -f k8s/auth-service.yaml
+
+# Check service mesh status
+linkerd viz stat deploy/auth-service -n munshi
+
+# View authentication metrics
+linkerd viz routes deploy/auth-service -n munshi
+```
+
+### **Key Metrics Available**
+
+- **Login Success Rate**: Percentage of successful authentications
+- **Request Latency**: P99 response times for auth endpoints
+- **Service Dependencies**: Visual topology of service communication
+- **Security Events**: mTLS verification and identity validation
+
+For complete Linkerd integration details, see [`LINKERD.md`](../../LINKERD.md).
 
 ## Security Concepts Explained
 

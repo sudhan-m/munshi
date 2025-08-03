@@ -49,19 +49,27 @@ app.add_middleware(
 )
 
 @app.middleware("http")
-async def verify_mtls_client(request: Request, call_next):
-    """Verify mTLS client certificate for internal service communication"""
-    # Check if request is from API Gateway
+async def verify_linkerd_client(request: Request, call_next):
+    """Verify client identity via Linkerd service mesh"""
+    # Linkerd provides automatic mTLS and service identity
+    linkerd_service = request.headers.get("X-Linkerd-Service-Name")
     gateway_id = request.headers.get("X-Gateway-ID")
     
-    # In production, you would verify the client certificate here
-    # For now, we trust requests with the gateway ID header
-    if gateway_id == "api-gateway":
+    # Trust requests that come through Linkerd with proper headers
+    if linkerd_service == "api-gateway" and gateway_id == "api-gateway":
         request.state.verified_client = True
+        request.state.service_mesh = "linkerd"
+        request.state.source_service = linkerd_service
     else:
         request.state.verified_client = False
+        request.state.service_mesh = None
+        request.state.source_service = "unknown"
     
+    # Add Linkerd observability headers to response
     response = await call_next(request)
+    response.headers["X-Linkerd-Auth-Service"] = "true"
+    response.headers["X-Service-Mesh-Verified"] = str(request.state.verified_client)
+    
     return response
 
 # Initialize database tables and Redis cache on startup

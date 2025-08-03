@@ -1,21 +1,33 @@
 # Deployment Guide
 
-Complete deployment guide for the Munshi microservices architecture with Redis caching, Caddy reverse proxy, advanced rate limiting, and mTLS communication.
+Complete deployment guide for the Munshi microservices architecture with Linkerd service mesh, Redis caching, Caddy reverse proxy, advanced rate limiting, and automatic mTLS communication.
 
 ## Quick Start
+
+### Production (Kubernetes + Linkerd - Recommended)
+
+```bash
+# Deploy with automatic mTLS and observability
+./deploy.sh k8s production
+
+# Access services
+linkerd viz dashboard                           # Observability dashboard
+kubectl port-forward -n munshi svc/caddy-ingress 8443:443  # Application
+```
 
 ### Development (Local HTTPS)
 
 ```bash
-# Full microservices with Redis caching and HTTPS auth
+# Option 1: Linkerd-compatible (recommended for development)
+./deploy.sh docker development
+
+# Option 2: Traditional microservices
 docker-compose -f docker-compose.microservices.yml up -d
 
 # Services available at:
-# - Caddy Reverse Proxy: https://localhost (entry point)
-# - Auth Service: https://localhost:8001 (internal via mTLS)
-# - API Gateway: http://localhost:8000 (internal)
-# - Redis Auth Cache: redis://localhost:6380/1
-# - Redis Gateway Cache: redis://localhost:6381/0
+# - Application: https://localhost
+# - Linkerd Viz: http://localhost:8080 (Option 1 only)
+# - Caddy Admin: http://localhost:2019
 ```
 
 ### Single Auth Service (Local HTTPS)
@@ -32,8 +44,19 @@ docker-compose up -d
 
 ## Architecture Overview
 
+### Linkerd Service Mesh Architecture (Recommended)
 ```
-Internet → Caddy Reverse Proxy (HTTPS) → API Gateway → Auth Service (mTLS)
+Internet → Caddy Ingress → API Gateway → Auth Service
+           + Linkerd       + Linkerd      + Linkerd
+                ↓              ↓             ↓
+        Automatic mTLS    Observability  Service Identity
+        Traffic Management Load Balancing Circuit Breaking
+        Distributed Tracing Retries & Timeouts Security
+```
+
+### Traditional Architecture
+```
+Internet → Caddy Reverse Proxy (HTTPS) → API Gateway → Auth Service (Manual mTLS)
                 ↓                              ↓              ↓
         TLS Termination                Redis Cache     Redis Cache
         Request Tracing              Rate Limiting    Token Blacklist

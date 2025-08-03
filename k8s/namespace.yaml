@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: munshi
+  annotations:
+    # Enable Linkerd sidecar injection for automatic mTLS
+    linkerd.io/inject: enabled
+  labels:
+    name: munshi
+    # Enable Linkerd for the entire namespace
+    linkerd.io/is-control-plane: "false"

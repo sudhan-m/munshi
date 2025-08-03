@@ -1,0 +1,138 @@
+# Service Profiles for Linkerd - Enable advanced traffic management and observability
+apiVersion: linkerd.io/v1alpha2
+kind: ServiceProfile
+metadata:
+  name: auth-service.munshi.svc.cluster.local
+  namespace: munshi
+spec:
+  routes:
+  - name: register
+    condition:
+      method: POST
+      pathRegex: /auth/register
+    timeout: 10s
+    retryBudget:
+      retryRatio: 0.2
+      minRetriesPerSecond: 10
+      ttl: 10s
+  - name: login
+    condition:
+      method: POST
+      pathRegex: /auth/login
+    timeout: 5s
+    retryBudget:
+      retryRatio: 0.1
+      minRetriesPerSecond: 5
+      ttl: 10s
+  - name: verify
+    condition:
+      method: GET
+      pathRegex: /auth/verify
+    timeout: 3s
+    retryBudget:
+      retryRatio: 0.3
+      minRetriesPerSecond: 20
+      ttl: 10s
+  - name: logout
+    condition:
+      method: POST
+      pathRegex: /auth/logout
+    timeout: 5s
+    retryBudget:
+      retryRatio: 0.2
+      minRetriesPerSecond: 10
+      ttl: 10s
+  - name: me
+    condition:
+      method: GET
+      pathRegex: /auth/me
+    timeout: 3s
+    retryBudget:
+      retryRatio: 0.3
+      minRetriesPerSecond: 20
+      ttl: 10s
+  - name: health
+    condition:
+      method: GET
+      pathRegex: /health
+    timeout: 2s
+    retryBudget:
+      retryRatio: 0.5
+      minRetriesPerSecond: 50
+      ttl: 10s
+---
+apiVersion: linkerd.io/v1alpha2
+kind: ServiceProfile
+metadata:
+  name: api-gateway.munshi.svc.cluster.local
+  namespace: munshi
+spec:
+  routes:
+  - name: auth_proxy
+    condition:
+      method: GET|POST|PUT|DELETE|PATCH
+      pathRegex: /auth/.*
+    timeout: 10s
+    retryBudget:
+      retryRatio: 0.2
+      minRetriesPerSecond: 10
+      ttl: 10s
+  - name: protected_services
+    condition:
+      method: GET|POST|PUT|DELETE|PATCH
+      pathRegex: /protected/.*
+    timeout: 15s
+    retryBudget:
+      retryRatio: 0.1
+      minRetriesPerSecond: 5
+      ttl: 10s
+  - name: services_list
+    condition:
+      method: GET
+      pathRegex: /services
+    timeout: 5s
+    retryBudget:
+      retryRatio: 0.3
+      minRetriesPerSecond: 20
+      ttl: 10s
+  - name: service_registration
+    condition:
+      method: POST|DELETE
+      pathRegex: /services/.*
+    timeout: 10s
+    retryBudget:
+      retryRatio: 0.2
+      minRetriesPerSecond: 10
+      ttl: 10s
+  - name: health
+    condition:
+      method: GET
+      pathRegex: /health
+    timeout: 2s
+    retryBudget:
+      retryRatio: 0.5
+      minRetriesPerSecond: 50
+      ttl: 10s
+---
+# Traffic Split for A/B testing and canary deployments
+apiVersion: split.smi-spec.io/v1alpha1
+kind: TrafficSplit
+metadata:
+  name: auth-service-split
+  namespace: munshi
+spec:
+  service: auth-service
+  backends:
+  - service: auth-service
+    weight: 100
+---
+apiVersion: split.smi-spec.io/v1alpha1
+kind: TrafficSplit
+metadata:
+  name: api-gateway-split
+  namespace: munshi
+spec:
+  service: api-gateway
+  backends:
+  - service: api-gateway
+    weight: 100

@@ -1,0 +1,229 @@
+version: '3.8'
+
+# Linkerd-compatible Docker Compose for development
+# Note: This is for development testing. Production should use Kubernetes with Linkerd.
+# Linkerd proxy sidecars would be automatically injected in K8s environment.
+
+services:
+  # Auth Service Database
+  auth-postgres:
+    image: postgres:15
+    container_name: auth-postgres
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - linkerd-network
+    labels:
+      # Simulate Linkerd annotation
+      linkerd.io/inject: "enabled"
+
+  # Gateway Service Database
+  gateway-postgres:
+    image: postgres:15
+    container_name: gateway-postgres
+    environment:
+      POSTGRES_DB: gateway_db
+      POSTGRES_USER: gateway_user
+      POSTGRES_PASSWORD: gateway_password
+    ports:
+      - "5434:5432"
+    volumes:
+      - gateway_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway_user -d gateway_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - linkerd-network
+    labels:
+      linkerd.io/inject: "enabled"
+
+  # Auth Service Redis
+  auth-redis:
+    image: redis:7-alpine
+    container_name: auth-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - auth_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - linkerd-network
+    labels:
+      linkerd.io/inject: "enabled"
+
+  # Gateway Service Redis
+  gateway-redis:
+    image: redis:7-alpine
+    container_name: gateway-redis
+    ports:
+      - "6381:6379"
+    volumes:
+      - gateway_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - linkerd-network
+    labels:
+      linkerd.io/inject: "enabled"
+
+  # Auth Service (Linkerd-ready)
+  auth-service:
+    build:
+      context: ./src/auth_service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    expose:
+      - "8001"
+    environment:
+      # Use service names for Linkerd service discovery
+      - AUTH_DATABASE_URL=postgresql://auth_user:auth_password@auth-postgres:5432/auth_db
+      - AUTH_REDIS_URL=redis://auth-redis:6379/1
+      - JWT_SECRET_KEY=auth_service_linkerd_secret_key_change_this
+      - ENVIRONMENT=development
+      - DEBUG=true
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+      auth-redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - linkerd-network
+    labels:
+      # Linkerd sidecar injection (simulated)
+      linkerd.io/inject: "enabled"
+      config.linkerd.io/proxy-require-identity-on-inbound-ports: "8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Gateway (Linkerd-ready)
+  api-gateway:
+    build:
+      context: ./src/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    expose:
+      - "8000"
+    environment:
+      # Use Linkerd-style service discovery URLs
+      - GATEWAY_DATABASE_URL=postgresql://gateway_user:gateway_password@gateway-postgres:5432/gateway_db
+      - GATEWAY_REDIS_URL=redis://gateway-redis:6379/0
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - RATE_LIMIT_ENABLED=true
+      - DEFAULT_RATE_LIMIT_REQUESTS=1000
+      - AUTHENTICATED_RATE_LIMIT_REQUESTS=5000
+      - JWT_VERIFICATION_ENABLED=true
+      - CIRCUIT_BREAKER_ENABLED=true
+    depends_on:
+      gateway-postgres:
+        condition: service_healthy
+      gateway-redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - linkerd-network
+    labels:
+      # Linkerd sidecar injection (simulated)
+      linkerd.io/inject: "enabled"
+      config.linkerd.io/proxy-require-identity-on-inbound-ports: "8000"
+
+  # Caddy Reverse Proxy (Linkerd-aware)
+  caddy:
+    build:
+      context: ./src/api-gateway/caddy
+      dockerfile: Dockerfile
+    container_name: caddy
+    ports:
+      - "443:443"
+      - "80:80"
+      - "2019:2019"  # Admin API
+    environment:
+      - ENVIRONMENT=development
+      - LINKERD_ENABLED=true
+    depends_on:
+      api-gateway:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - linkerd-network
+    labels:
+      # Linkerd edge proxy configuration
+      linkerd.io/inject: "enabled"
+      config.linkerd.io/proxy-cpu-request: "50m"
+      config.linkerd.io/proxy-memory-request: "50Mi"
+    volumes:
+      - caddy_data:/etc/caddy/certs
+      - caddy_config:/etc/caddy/config
+
+  # Linkerd Viz (for development observability)
+  linkerd-viz:
+    image: linkerd/viz:stable-2.14.0
+    container_name: linkerd-viz
+    ports:
+      - "8084:8084"  # Grafana
+      - "9090:9090"  # Prometheus
+      - "8080:8080"  # Web dashboard
+    environment:
+      - LINKERD_NAMESPACE=linkerd-viz
+    networks:
+      - linkerd-network
+    volumes:
+      - linkerd_viz_data:/var/lib/linkerd-viz
+    labels:
+      linkerd.io/control-plane-ns: "linkerd"
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - linkerd-network
+    labels:
+      linkerd.io/inject: "enabled"
+
+volumes:
+  auth_postgres_data:
+  gateway_postgres_data:
+  auth_redis_data:
+  gateway_redis_data:
+  caddy_data:
+  caddy_config:
+  linkerd_viz_data:
+
+networks:
+  linkerd-network:
+    driver: bridge
+    labels:
+      linkerd.io/is-control-plane: "false"

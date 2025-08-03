@@ -1,0 +1,203 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caddy-ingress
+  namespace: munshi
+  annotations:
+    linkerd.io/inject: enabled
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: caddy-ingress
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: caddy-ingress
+        version: v1
+      annotations:
+        linkerd.io/inject: enabled
+        # Linkerd sidecar configuration for ingress
+        config.linkerd.io/proxy-cpu-request: "50m"
+        config.linkerd.io/proxy-memory-request: "50Mi"
+        config.linkerd.io/proxy-cpu-limit: "500m"
+        config.linkerd.io/proxy-memory-limit: "200Mi"
+    spec:
+      containers:
+      - name: caddy
+        image: caddy:2-alpine
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 443
+          name: https
+        - containerPort: 2019
+          name: admin
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        volumeMounts:
+        - name: caddy-config
+          mountPath: /etc/caddy/Caddyfile
+          subPath: Caddyfile
+        - name: caddy-data
+          mountPath: /data
+        - name: caddy-config-dir
+          mountPath: /config
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 2019
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 2019
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: caddy-config
+        configMap:
+          name: caddy-config
+      - name: caddy-data
+        emptyDir: {}
+      - name: caddy-config-dir
+        emptyDir: {}
+      serviceAccountName: caddy-ingress
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: caddy-ingress
+  namespace: munshi
+  annotations:
+    linkerd.io/inject: enabled
+spec:
+  selector:
+    app: caddy-ingress
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: https
+    port: 443
+    targetPort: 443
+  - name: admin
+    port: 2019
+    targetPort: 2019
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: caddy-ingress
+  namespace: munshi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  namespace: munshi
+data:
+  Caddyfile: |
+    {
+        # Global options
+        auto_https disable_redirects
+        local_certs
+        
+        # Admin API
+        admin 0.0.0.0:2019
+        
+        # Logging
+        log {
+            output stdout
+            format json
+            level INFO
+        }
+    }
+    
+    # HTTP to HTTPS redirect
+    :80 {
+        redir https://{host}{uri} permanent
+    }
+    
+    # Main HTTPS server with Linkerd integration
+    :443 {
+        # TLS configuration
+        tls internal
+        
+        # Security headers
+        header {
+            Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+            X-XSS-Protection "1; mode=block"
+            X-Content-Type-Options "nosniff"
+            X-Frame-Options "DENY"
+            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+            X-Request-ID {uuid}
+            -Server
+        }
+        
+        # Emergency rate limiting (Linkerd handles sophisticated rate limiting)
+        rate_limit {
+            zone emergency_ddos {
+                key {remote_host}
+                events 1000
+                window 1m
+            }
+        }
+        
+        # Health check endpoint (bypasses rate limiting)
+        handle /health {
+            reverse_proxy api-gateway.munshi.svc.cluster.local:8000 {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Request-ID {uuid}
+                header_up X-Gateway-Health-Check "true"
+            }
+        }
+        
+        # Proxy all requests to API Gateway through Linkerd
+        handle {
+            reverse_proxy api-gateway.munshi.svc.cluster.local:8000 {
+                # Use Linkerd service discovery
+                transport http {
+                    dial_timeout 5s
+                    response_header_timeout 30s
+                    keepalive 30s
+                    keepalive_idle_conns 10
+                    max_conns_per_host 20
+                }
+                
+                # Headers for request tracing and client info
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Request-ID {uuid}
+                header_up X-Forwarded-For {remote_host}
+            }
+        }
+        
+        # Gzip compression
+        encode {
+            gzip {
+                level 6
+            }
+            zstd {
+                level 3
+            }
+        }
+        
+        # Access logging
+        log {
+            output stdout
+            format json
+        }
+    }

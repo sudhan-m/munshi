@@ -1,0 +1,53 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(chmod:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(true)",
+      "Bash(touch:*)"
+    ],
+    "deny": []
+  },
+  "documentation_standards": {
+    "mermaid_github_compatibility": {
+      "note": "GitHub has strict Mermaid diagram requirements that differ from other renderers",
+      "rules": [
+        "NEVER use inline styling in sequence diagrams (style statements cause parse errors)",
+        "Remove all 'style X fill:#color' statements from sequenceDiagram blocks",
+        "Styling is only supported in flowcharts and some other diagram types",
+        "Always test Mermaid syntax against GitHub's renderer limitations",
+        "Focus on structure and clarity over visual styling for sequence diagrams",
+        "Avoid special characters in node text: quotes, apostrophes, colons, @ symbols",
+        "Remove quotes from JSON examples in diagram nodes",
+        "Email addresses with @ symbols are treated as markdown links - use descriptive text instead",
+        "Simplify complex text content that might contain reserved characters"
+      ],
+      "common_errors": [
+        "Parse error: got 'TXT' - usually caused by style statements in sequence diagrams",
+        "Expecting arrow types but got 'TXT' - mixing style with sequence elements",
+        "Unsupported markdown: link - caused by @ symbols in email addresses or URLs",
+        "JSON-like content with quotes and colons breaks GitHub Mermaid parser",
+        "Email addresses like user@example.com are interpreted as markdown links"
+      ],
+      "best_practices": [
+        "Use participant aliases for cleaner sequence diagrams",
+        "Keep flowchart styling simple and GitHub-compatible",
+        "Test all diagrams in GitHub preview before committing",
+        "Prioritize GitHub compatibility over rich styling"
+      ]
+    },
+    "readme_requirements": {
+      "always_github_friendly": true,
+      "include_mermaid_diagrams": true,
+      "beginner_friendly_explanations": true,
+      "comprehensive_setup_guides": true
+    }
+  }
+}

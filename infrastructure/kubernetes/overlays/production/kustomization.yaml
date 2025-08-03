@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: munshi-prod
+
+resources:
+  - ../../base
+
+patchesStrategicMerge:
+  - auth-service-patch.yaml
+  - api-gateway-patch.yaml
+  - databases-patch.yaml
+  - hpa.yaml
+
+commonLabels:
+  environment: production
+
+images:
+  - name: munshi-auth-service
+    newTag: v1.0.0
+  - name: munshi-api-gateway
+    newTag: v1.0.0
+
+replicas:
+  - name: auth-service
+    count: 3
+  - name: api-gateway
+    count: 3
+  - name: auth-postgres
+    count: 1
+  - name: gateway-postgres
+    count: 1

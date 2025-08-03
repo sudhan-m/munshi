@@ -1,0 +1,121 @@
+version: '3.8'
+
+# Linkerd-compatible development deployment
+# Prepares services for Linkerd service mesh integration
+
+services:
+  auth-service:
+    environment:
+      - ENABLE_SERVICE_MESH=true
+      - SERVICE_MESH_TYPE=linkerd
+      - SERVICE_NAME=auth-service
+      - SERVICE_NAMESPACE=munshi
+      - TRUST_SERVICE_MESH_HEADERS=true
+    labels:
+      - "linkerd.io/inject=enabled"
+    networks:
+      - munshi-mesh-network
+
+  api-gateway:
+    environment:
+      - ENABLE_SERVICE_MESH=true
+      - SERVICE_MESH_TYPE=linkerd
+      - SERVICE_NAME=api-gateway
+      - SERVICE_NAMESPACE=munshi
+      - TRUST_SERVICE_MESH_HEADERS=true
+    labels:
+      - "linkerd.io/inject=enabled"
+    networks:
+      - munshi-mesh-network
+
+  # Databases don't need mesh injection
+  auth-postgres:
+    networks:
+      - munshi-mesh-network
+
+  gateway-postgres:
+    networks:
+      - munshi-mesh-network
+
+  auth-redis:
+    networks:
+      - munshi-mesh-network
+
+  gateway-redis:
+    networks:
+      - munshi-mesh-network
+
+  # Caddy with Linkerd-compatible configuration
+  caddy:
+    volumes:
+      - ./caddy/Caddyfile.linkerd:/etc/caddy/Caddyfile
+    labels:
+      - "linkerd.io/inject=enabled"
+    networks:
+      - munshi-mesh-network
+
+  # Prometheus for metrics collection (Linkerd integration)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: munshi-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - munshi-mesh-network
+    restart: unless-stopped
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: munshi-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - munshi-mesh-network
+    restart: unless-stopped
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: munshi-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    volumes:
+      - jaeger_data:/tmp
+    networks:
+      - munshi-mesh-network
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  jaeger_data:
+
+networks:
+  munshi-mesh-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

@@ -1,11 +1,12 @@
-# Claude Code settings
-.claude/
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -19,13 +20,32 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# Virtual environments
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
 .env
 .venv
 env/
@@ -34,14 +54,14 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -50,34 +70,55 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
+# Docker
+.dockerignore
+
+# Secrets and certificates
+*.pem
+*.key
+*.crt
+*.p12
+secrets/
+certs/
+
 # Logs
-*.log
 logs/
+*.log
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Docker
-.dockerignore
+# Backup files
+*.bak
+*.backup
+*.old
 
-# Environment variables
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Environment specific
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.development
+.env.staging
+.env.production
 
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
+# Poetry
+poetry.lock
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Redis dumps
+dump.rdb
+
+# Data directories
+prometheus_data/
+grafana_data/
+jaeger_data/

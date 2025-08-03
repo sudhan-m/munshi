@@ -1,16 +1,16 @@
 # Munshi Microservices Architecture
 
-A secure, production-ready microservices architecture with independent API Gateway and Authentication services built with Python FastAPI. Features distributed Redis caching, intelligent rate limiting, and optimized reverse proxy integration.
+A secure, production-ready microservices architecture with independent API Gateway and Authentication services built with Python FastAPI. Features Linkerd service mesh integration, shared component libraries, comprehensive testing, and enterprise-grade deployment infrastructure.
 
-## Architecture Overview
+## 🏗️ Architecture Overview
 
-This project implements a true microservices architecture where each service:
-- Has its own dedicated database and Redis cache
-- Can be deployed independently with full isolation
-- Has separate configuration and dependencies
-- Communicates via HTTP APIs with mTLS security
-- Features distributed caching and rate limiting
-- Implements intelligent middleware for performance optimization
+This project implements a modern microservices architecture following enterprise best practices:
+
+- **Service Mesh**: Linkerd integration for automatic mTLS, observability, and reliability
+- **Shared Libraries**: Common components for auth, caching, database, and observability
+- **Comprehensive Testing**: Unit, integration, E2E, performance, and security tests
+- **Infrastructure as Code**: Docker, Kubernetes, and Terraform deployment options
+- **Enterprise Standards**: Security scanning, code quality, and CI/CD pipeline ready
 
 ```mermaid
 graph TB
@@ -19,425 +19,463 @@ graph TB
     end
     
     subgraph "Ingress Layer - Port 443"
-        CADDY[Caddy Reverse Proxy<br/>HTTPS TLS Termination<br/>Emergency DDoS Protection<br/>Security Headers]
+        CADDY[Caddy Reverse Proxy<br/>HTTPS TLS Termination<br/>Request Tracing<br/>Compression]
+    end
+    
+    subgraph "Service Mesh Layer"
+        LINKERD[Linkerd Service Mesh<br/>Automatic mTLS<br/>Traffic Management<br/>Observability]
     end
     
     subgraph "API Gateway - Port 8000"
         GATEWAY[API Gateway Service<br/>FastAPI Application]
         GW_DB[(PostgreSQL Database<br/>gateway_db:5434)]
-        GW_REDIS[(Redis Cache<br/>Database 0 - Port 6381)]
+        GW_REDIS[(Redis Performance Cache<br/>Database 0 - Port 6381)]
         
         subgraph "Gateway Features"
-            RATE_LIMIT[Rate Limiting<br/>1000-5000 req/min]
-            RESP_CACHE[Response Caching<br/>5-10 min TTL]
-            SVC_REGISTRY[Service Registry<br/>60s TTL]
-            CIRCUIT_BREAK[Circuit Breaker<br/>Fault Tolerance]
+            RATE_LIMIT[Advanced Rate Limiting<br/>Sliding Window Algorithm]
+            RESP_CACHE[Intelligent Caching<br/>TTL-based Invalidation]
+            SVC_REGISTRY[Service Discovery<br/>Health Monitoring]
+            CIRCUIT_BREAK[Circuit Breaker<br/>Distributed Failure Tracking]
         end
     end
     
     subgraph "Auth Service - Port 8001"
-        AUTH_SVC[Auth Service<br/>FastAPI Application]
+        AUTH_SVC[Authentication Service<br/>FastAPI Application]
         AUTH_DB[(PostgreSQL Database<br/>auth_db:5433)]
-        AUTH_REDIS[(Redis Cache<br/>Database 1 - Port 6380)]
+        AUTH_REDIS[(Redis Security Cache<br/>Database 1 - Port 6380)]
         
         subgraph "Security Features"
-            TOKEN_BL[JWT Token Blacklisting<br/>Instant Logout]
-            SESSION_CACHE[User Session Cache<br/>1-hour TTL]
-            FAILED_LOGIN[Failed Login Tracking<br/>15-min Window]
-            ACCOUNT_LOCK[Account Lockout<br/>15-min TTL]
+            TOKEN_BL[JWT Token Blacklisting<br/>Instant Logout Security]
+            SESSION_CACHE[User Session Cache<br/>1-hour Performance TTL]
+            FAILED_LOGIN[Failed Login Tracking<br/>15-min Sliding Window]
+            ACCOUNT_LOCK[Account Lockout<br/>Brute Force Protection]
         end
     end
     
-    %% Client to Ingress
+    subgraph "Shared Libraries"
+        SHARED_AUTH[Authentication Utils<br/>JWT, Middleware, Validators]
+        SHARED_CACHE[Cache Components<br/>Redis Client, Decorators]
+        SHARED_DB[Database Utils<br/>Models, Connections, Repos]
+        SHARED_OBS[Observability<br/>Logging, Metrics, Tracing]
+    end
+    
+    subgraph "Observability Stack"
+        PROMETHEUS[Prometheus<br/>Metrics Collection]
+        GRAFANA[Grafana<br/>Visualization]
+        JAEGER[Jaeger<br/>Distributed Tracing]
+    end
+    
     CLIENT -->|HTTPS| CADDY
+    CADDY -->|HTTP| LINKERD
+    LINKERD -->|mTLS| GATEWAY
+    LINKERD -->|mTLS| AUTH_SVC
     
-    %% Ingress to Gateway
-    CADDY -->|HTTP| GATEWAY
-    
-    %% Gateway to Auth Service (mTLS)
-    GATEWAY -->|mTLS| AUTH_SVC
-    
-    %% Gateway Internal Connections
     GATEWAY --> GW_DB
     GATEWAY --> GW_REDIS
+    GATEWAY -->|Service Calls| AUTH_SVC
+    
+    AUTH_SVC --> AUTH_DB
+    AUTH_SVC --> AUTH_REDIS
+    
     GATEWAY --> RATE_LIMIT
     GATEWAY --> RESP_CACHE
     GATEWAY --> SVC_REGISTRY
     GATEWAY --> CIRCUIT_BREAK
     
-    %% Auth Service Internal Connections
-    AUTH_SVC --> AUTH_DB
-    AUTH_SVC --> AUTH_REDIS
     AUTH_SVC --> TOKEN_BL
     AUTH_SVC --> SESSION_CACHE
     AUTH_SVC --> FAILED_LOGIN
     AUTH_SVC --> ACCOUNT_LOCK
     
-    %% Redis Feature Connections
-    GW_REDIS --> RATE_LIMIT
-    GW_REDIS --> RESP_CACHE
-    GW_REDIS --> SVC_REGISTRY
-    GW_REDIS --> CIRCUIT_BREAK
+    GATEWAY -.-> SHARED_AUTH
+    GATEWAY -.-> SHARED_CACHE
+    GATEWAY -.-> SHARED_DB
+    GATEWAY -.-> SHARED_OBS
     
-    AUTH_REDIS --> TOKEN_BL
-    AUTH_REDIS --> SESSION_CACHE
-    AUTH_REDIS --> FAILED_LOGIN
-    AUTH_REDIS --> ACCOUNT_LOCK
+    AUTH_SVC -.-> SHARED_AUTH
+    AUTH_SVC -.-> SHARED_CACHE
+    AUTH_SVC -.-> SHARED_DB
+    AUTH_SVC -.-> SHARED_OBS
+    
+    LINKERD --> PROMETHEUS
+    PROMETHEUS --> GRAFANA
+    AUTH_SVC --> JAEGER
+    GATEWAY --> JAEGER
     
     classDef ingress fill:#ff9800,stroke:#333,stroke-width:2px
+    classDef mesh fill:#9c27b0,stroke:#333,stroke-width:2px
     classDef gateway fill:#e1f5fe,stroke:#333,stroke-width:2px
     classDef auth fill:#e8f5e8,stroke:#333,stroke-width:2px
     classDef database fill:#f3e5f5,stroke:#333,stroke-width:2px
     classDef redis fill:#fff3e0,stroke:#333,stroke-width:2px
-    classDef security fill:#fce4ec,stroke:#333,stroke-width:2px
-    classDef performance fill:#e8f5e8,stroke:#333,stroke-width:2px
+    classDef features fill:#fce4ec,stroke:#333,stroke-width:2px
+    classDef shared fill:#f9f9f9,stroke:#333,stroke-width:2px
+    classDef observability fill:#e0f2f1,stroke:#333,stroke-width:2px
     
     class CADDY ingress
-    class GATEWAY,GW_DB,RATE_LIMIT,RESP_CACHE,SVC_REGISTRY,CIRCUIT_BREAK gateway
-    class AUTH_SVC,AUTH_DB,TOKEN_BL,SESSION_CACHE,FAILED_LOGIN,ACCOUNT_LOCK auth
+    class LINKERD mesh
+    class GATEWAY gateway
+    class AUTH_SVC auth
     class GW_DB,AUTH_DB database
     class GW_REDIS,AUTH_REDIS redis
-    class TOKEN_BL,SESSION_CACHE,FAILED_LOGIN,ACCOUNT_LOCK security
-    class RATE_LIMIT,RESP_CACHE,SVC_REGISTRY,CIRCUIT_BREAK performance
+    class RATE_LIMIT,RESP_CACHE,SVC_REGISTRY,CIRCUIT_BREAK,TOKEN_BL,SESSION_CACHE,FAILED_LOGIN,ACCOUNT_LOCK features
+    class SHARED_AUTH,SHARED_CACHE,SHARED_DB,SHARED_OBS shared
+    class PROMETHEUS,GRAFANA,JAEGER observability
 ```
 
-## Services
+## 📁 Project Structure
 
-### Caddy Reverse Proxy (HTTPS Port 443)
-**Optimized TLS termination and request routing**
-- **Automatic HTTPS**: Self-signed certificates (dev) / Let's Encrypt (prod)
-- **Emergency DDoS Protection**: High threshold rate limiting (1000 req/min)
-- **Response Compression**: gzip and zstd compression for better performance
-- **Request Tracing**: Unique request IDs for correlation across services
-- **Connection Pooling**: Optimized HTTP connections to API Gateway
-- **Security Headers**: HSTS enforcement and server information hiding
-- **Admin API**: Management interface on port 2019
+```
+munshi/
+├── README.md                                    # Main project documentation
+├── IMPROVED_STRUCTURE.md                        # Structure improvement guide
+├── LINKERD.md                                   # Service mesh integration guide
+├── PROJECT_STRUCTURE.md                         # Legacy structure documentation
+├── pyproject.toml                               # Python project configuration
+├── Makefile                                     # Development task automation
+│
+├── services/                                    # 🔧 Microservices
+│   ├── shared/                                  # Shared components and utilities
+│   │   ├── auth/                                # Common authentication utilities
+│   │   │   ├── jwt_handler.py                  # JWT token management
+│   │   │   └── middleware.py                   # Authentication middleware
+│   │   ├── cache/                               # Common cache utilities
+│   │   │   ├── redis_client.py                 # Redis client with pooling
+│   │   │   └── cache_decorators.py             # Caching decorators
+│   │   ├── database/                            # Common database utilities
+│   │   │   ├── base_model.py                   # Base models and mixins
+│   │   │   └── connection.py                   # Connection management
+│   │   ├── observability/                       # Common observability
+│   │   │   ├── logging.py                      # Structured logging
+│   │   │   ├── metrics.py                      # Prometheus metrics
+│   │   │   └── tracing.py                      # OpenTelemetry tracing
+│   │   ├── config/                              # Common configuration
+│   │   │   ├── base_settings.py                # Base settings classes
+│   │   │   └── env_loader.py                   # Environment management
+│   │   └── utils/                               # Common utilities
+│   │       ├── validators.py                   # Input validation
+│   │       └── helpers.py                      # Helper functions
+│   │
+│   ├── auth-service/                            # Authentication microservice
+│   └── api-gateway/                             # API Gateway microservice
+│
+├── tests/                                       # 🧪 Comprehensive testing
+│   ├── conftest.py                              # Global test configuration
+│   ├── integration/                             # Cross-service integration tests
+│   │   └── test_auth_flow.py                   # Authentication flow tests
+│   ├── e2e/                                     # End-to-end user journey tests
+│   │   └── test_user_journey.py                # Complete user experience tests
+│   ├── performance/                             # Load and performance tests
+│   │   └── test_load_testing.py                # Throughput and latency tests
+│   └── security/                                # Security vulnerability tests
+│       └── test_security_vulnerabilities.py    # Security testing suite
+│
+├── infrastructure/                              # 🏗️ Infrastructure as Code
+│   ├── docker/                                  # Docker configurations
+│   │   ├── docker-compose.yml                  # Base compose configuration
+│   │   ├── docker-compose.dev.yml              # Development overrides
+│   │   ├── docker-compose.prod.yml             # Production optimizations
+│   │   └── docker-compose.linkerd.yml          # Service mesh integration
+│   ├── kubernetes/                              # Kubernetes manifests
+│   │   ├── base/                                # Base Kubernetes resources
+│   │   ├── overlays/                            # Kustomize environment overlays
+│   │   │   ├── development/                    # Development configuration
+│   │   │   ├── staging/                        # Staging configuration
+│   │   │   └── production/                     # Production configuration
+│   │   └── linkerd/                             # Service mesh configurations
+│   ├── scripts/                                 # Deployment and utility scripts
+│   │   └── deploy.sh                           # Universal deployment script
+│   ├── terraform/                               # Infrastructure provisioning
+│   └── monitoring/                              # Observability configurations
+│       ├── prometheus/                         # Metrics collection
+│       ├── grafana/                            # Visualization dashboards
+│       └── alerting/                           # Alert management
+│
+└── docs/                                        # 📚 Documentation
+    ├── api/                                     # API documentation
+    ├── architecture/                            # Architecture documentation
+    ├── guides/                                  # User and developer guides
+    └── contributing/                            # Contribution guidelines
+```
 
-### API Gateway (Internal Port 8000)
-**Intelligent service mesh with Redis-powered features**
-- **Dedicated Database**: PostgreSQL on port 5434 (service registry, logs)
-- **Dedicated Redis Cache**: Redis on port 6381 with advanced features:
-  - **Sliding Window Rate Limiting**: 1000 req/min (anonymous), 5000 req/min (authenticated)
-  - **Response Caching**: Intelligent GET request caching with TTL management
-  - **Service Discovery Cache**: Fast service resolution with 60s TTL
-  - **Circuit Breaker State**: Distributed fault tolerance tracking
-- **Authentication Middleware**: JWT token validation with blacklist checking
-- **Request Proxying**: Intelligent routing with connection pooling
-- **Enhanced Logging**: Request tracing with timing and correlation IDs
+## 🚀 Quick Start
 
-### Authentication Service (Internal Port 8001)
-**Secure authentication with Redis-powered security features**
-- **mTLS Server**: Validates gateway client certificates
-- **Dedicated Database**: PostgreSQL on port 5433 (user accounts)
-- **Dedicated Redis Cache**: Redis on port 6380 with security features:
-  - **JWT Token Blacklisting**: Instant logout and token invalidation
-  - **User Session Caching**: Fast session lookup with 1-hour TTL
-  - **Failed Login Tracking**: Sliding window attempt counting (15-min TTL)
-  - **Account Lockout Protection**: Automatic lockout after 5 failed attempts
-- **Secure Password Handling**: Server-side bcrypt with strong validation
-- **Enhanced Authentication**: Rate-limited login with intelligent caching
+### Prerequisites
 
-## Security Features
+- Python 3.11+
+- Docker and Docker Compose
+- Poetry (recommended) or pip
+- kubectl (for Kubernetes deployment)
+- Linkerd CLI (for service mesh)
 
-### **Linkerd Service Mesh Security (Recommended)**
-- **Automatic mTLS**: Zero-config mutual TLS between all services with identity verification
-- **Service Identity**: X.509 certificate-based authentication with automatic rotation
-- **Traffic Encryption**: End-to-end encryption for all service communication
-- **Identity-Based Authorization**: Fine-grained access control based on service identity
+### 1. Initialize Project
 
-### **Multi-Layer Security Architecture**
-- **mTLS Communication**: Automatic via Linkerd or manual between Gateway and Auth Service
-- **TLS Termination**: HTTPS with automatic certificate management via Caddy
-- **Certificate Authority**: Linkerd-managed or internal CA for service-to-service communication
-- **Redis-Powered Security**: Distributed security features across all services
-
-### **Authentication & Session Security**
-- **JWT Token Blacklisting**: Instant logout with Redis-based token invalidation
-- **User Session Caching**: Secure session management with automatic expiration
-- **Server-Side Password Hashing**: Bcrypt with salt rounds=12 and strong validation
-- **Password Strength Requirements**: Minimum 8 characters with uppercase, lowercase, and numbers
-- **Account Lockout Protection**: Automatic protection against brute force attacks
-
-### **Advanced Rate Limiting**
-- **Sliding Window Algorithm**: Precise rate limiting using Redis sorted sets
-- **Differentiated Limits**: Higher limits for authenticated users (5000 req/min vs 1000 req/min)
-- **Failed Login Tracking**: Per-user attempt counting with 15-minute sliding windows
-- **Emergency DDoS Protection**: Caddy-level protection for extreme attacks (1000 req/min)
-- **Graceful Degradation**: Rate limiting fails open if Redis is unavailable
-
-### **Request Security & Monitoring**
-- **Request Tracing**: Full correlation ID tracking from Caddy through all services
-- **Security Headers**: HSTS, CSP, X-Frame-Options, and more via Caddy
-- **Service Isolation**: Each service has separate credentials, databases, and Redis instances
-- **Client Verification**: Trusted host middleware for internal requests
-- **Enhanced Logging**: Structured logging with timing and security context
-- **Error Sanitization**: No sensitive data in error responses
-
-## Deployment Options
-
-### Option 1: Kubernetes with Linkerd Service Mesh (Recommended)
-Deploy with automatic mTLS, observability, and traffic management:
 ```bash
-# Install and deploy with Linkerd
-./deploy.sh k8s production
+# Clone and setup
+git clone <repository-url>
+cd munshi
 
-# Access services
-linkerd viz dashboard              # Observability dashboard
-kubectl port-forward -n munshi svc/caddy-ingress 8443:443  # Application
+# Initialize development environment
+make init
+
+# Or manually:
+poetry install --with dev,test
+make build
 ```
 
-### Option 2: Full Microservices with Caddy Ingress
-Deploy all services with manual mTLS and HTTPS termination:
+### 2. Start Development Environment
+
 ```bash
-docker-compose -f docker-compose.microservices.yml up -d
+# Start with Docker Compose
+make dev
 
-# Services available at:
-# - Caddy Ingress: https://localhost (all endpoints)
-# - Caddy Admin: http://localhost:2019
+# Or with Linkerd integration
+make dev-linkerd
+
+# Or manually
+./infrastructure/scripts/deploy.sh docker development
 ```
 
-### Option 3: Linkerd-Compatible Docker Compose (Development)
-Local development with Linkerd-ready configuration:
+### 3. Access Services
+
+- **Auth Service**: http://localhost:8001/docs
+- **API Gateway**: http://localhost:8000/docs
+- **Adminer** (DB): http://localhost:8080
+- **Redis Commander**: http://localhost:8081
+- **Prometheus**: http://localhost:9090 (with Linkerd)
+- **Grafana**: http://localhost:3000 (with Linkerd)
+- **Jaeger**: http://localhost:16686 (with Linkerd)
+
+## 🔧 Development
+
+### Common Tasks
+
 ```bash
-./deploy.sh docker development
+# Development
+make dev                    # Start development environment
+make test                   # Run all tests
+make lint                   # Run code quality checks
+make format                 # Format code
 
-# Services available at:
-# - Application: https://localhost
-# - Linkerd Viz: http://localhost:8080
-# - Jaeger UI: http://localhost:16686
+# Testing
+make test-unit              # Unit tests only
+make test-integration       # Integration tests
+make test-e2e              # End-to-end tests
+make test-performance      # Performance tests
+make test-security         # Security tests
+
+# Deployment
+make deploy-dev            # Deploy to development
+make deploy-staging        # Deploy to staging
+make deploy-prod           # Deploy to production (with confirmation)
+
+# Monitoring
+make status                # Show service status
+make logs                  # Show service logs
+make health                # Check service health
+make metrics               # Open metrics dashboards
 ```
 
-### Option 4: Independent Service Deployment
+### Working with Shared Components
 
-**Deploy API Gateway with Caddy Ingress:**
-```bash
-cd src/api-gateway
-docker-compose up -d
+The project uses shared libraries to reduce code duplication:
 
-# Gateway with Caddy available at: https://localhost
+```python
+# Example: Using shared authentication
+from services.shared.auth import JWTHandler, AuthMiddleware
+from services.shared.cache import RedisClient
+from services.shared.database import DatabaseManager
+from services.shared.observability import setup_logging, MetricsCollector
 ```
-
-**Deploy Auth Service independently:**
-```bash
-cd src/auth_service
-docker-compose up -d
-
-# Auth service available at: http://localhost:8001
-```
-
-### Option 5: Manual Setup
-
-**Auth Service with Reverse Proxy:**
-```bash
-cd src/auth_service
-cp .env.example .env
-# Edit .env with your configurations
-
-# Option 1: With HTTPS reverse proxy (recommended)
-docker-compose up -d
-
-# Option 2: Direct HTTP (development only)
-pip install -r requirements.txt
-python -m uvicorn main:app --host 0.0.0.0 --port 8001
-```
-
-**API Gateway:**
-```bash
-cd src/api-gateway
-cp .env.example .env
-# Edit AUTH_SERVICE_URL to point to your auth service
-pip install -r requirements.txt
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-## API Endpoints
-
-### API Endpoints (via Caddy Ingress at `https://localhost`)
-
-#### **Authentication Endpoints**
-- `POST /auth/register` - Register new user with plaintext password (over HTTPS)
-- `POST /auth/login` - User login with plaintext password (over HTTPS) 
-- `POST /auth/logout` - Logout user and blacklist JWT token (authenticated)
-- `GET /auth/verify` - Verify JWT token (includes blacklist checking)
-- `GET /auth/me` - Get current user info (with session caching)
-
-#### **System Endpoints**
-- `GET /health` - Health check endpoint (bypasses rate limiting)
-- `GET /services` - List registered services (authenticated)
-
-#### **Rate Limiting Headers**
-All API responses include rate limiting information:
-- `X-RateLimit-Limit` - Total requests allowed per window
-- `X-RateLimit-Remaining` - Requests remaining in current window
-- `X-RateLimit-Reset` - Unix timestamp when window resets
-- `X-RateLimit-Window` - Rate limit window duration in seconds
-- `X-RateLimit-Client` - Client type (ip/user)
-
-#### **Caching Headers**
-Cached responses include cache status:
-- `X-Cache` - Cache status (HIT/MISS)
-- `X-Cache-Date` - When response was cached (for HIT)
-- `X-Cache-TTL` - Cache TTL in seconds (for MISS)
-
-### Caddy Admin API (`http://localhost:2019`)
-- `GET /config/` - View current configuration
-- `GET /metrics` - Prometheus metrics
-- `POST /load` - Reload configuration
-- `GET /pki/ca/local` - View internal CA
-
-## Authentication Flow
-
-The service uses server-side bcrypt password hashing:
-
-### Registration (HTTPS via Caddy)
-```bash
-curl -k -X POST "https://localhost/auth/register" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "username": "johndoe",
-    "password": "MySecurePass123"
-  }'
-```
-
-### Login (HTTPS via Caddy)
-```bash
-curl -k -X POST "https://localhost/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "MySecurePass123"
-  }'
-```
-
-**Security & Performance Features:**
-- **mTLS**: Mutual TLS between Gateway and Auth Service
-- **TLS Termination**: HTTPS encryption via Caddy with automatic certificates
-- **Advanced Rate Limiting**: Redis-based sliding window (1000-5000 req/min based on auth status)
-- **JWT Token Blacklisting**: Instant logout with Redis-powered token invalidation
-- **Password validation**: 8+ chars, uppercase, lowercase, numbers with failed attempt tracking
-- **Bcrypt hashing**: Salt rounds=12 for strong password protection
-- **Account Lockout**: Automatic protection after 5 failed login attempts
-- **Response Caching**: Intelligent GET request caching for improved performance
-- **Security headers**: HSTS, CSP, XSS protection via Caddy
-- **Certificate Authority**: Internal CA for service communication
-- **Memory safety**: Passwords cleared from memory after processing
-
-## Redis Cache Features
-
-### **Authentication Service Cache (Redis DB 1)**
-- **Token Blacklist**: Instant JWT invalidation on logout
-- **User Sessions**: 1-hour cached session data for authenticated users
-- **Failed Login Tracking**: 15-minute sliding window for brute force protection
-- **Account Lockout**: Automatic 15-minute lockout after 5 failed attempts
-- **Cache TTL Management**: Automatic expiration based on token/session lifecycles
-
-### **API Gateway Cache (Redis DB 0)**
-- **Rate Limiting**: Sliding window algorithm with Redis sorted sets
-- **Response Caching**: GET request caching with configurable TTL (5-10 minutes)
-- **Service Discovery**: 60-second service information caching
-- **Circuit Breaker**: Distributed failure state tracking
-- **Connection Pooling**: Optimized Redis connections (50 max for gateway, 20 for auth)
-
-### **Cache Performance Benefits**
-- **Reduced Database Load**: Session and service data cached in Redis
-- **Faster Authentication**: Blacklist and session checks in sub-millisecond time
-- **Improved Rate Limiting**: Precise sliding window calculations
-- **Better User Experience**: Cached responses for faster API performance
-- **High Availability**: Graceful degradation when Redis is unavailable
-
-## Environment Variables
-
-### **Authentication Service**
-```bash
-# Database Configuration
-AUTH_DATABASE_URL=postgresql://auth_user:auth_password@localhost:5433/auth_db
-
-# Redis Cache Configuration
-AUTH_REDIS_URL=redis://localhost:6380/1
-
-# JWT Configuration
-JWT_SECRET_KEY=your_secret_key_here_change_in_production
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Service Configuration
-AUTH_SERVICE_HOST=0.0.0.0
-AUTH_SERVICE_PORT=8001
-ENVIRONMENT=development
-
-# Security Configuration
-PASSWORD_MIN_LENGTH=8
-MAX_LOGIN_ATTEMPTS=5
-ACCOUNT_LOCKOUT_MINUTES=15
-```
-
-### **API Gateway**
-```bash
-# Database Configuration  
-GATEWAY_DATABASE_URL=postgresql://gateway_user:gateway_password@localhost:5434/gateway_db
-
-# Redis Cache Configuration
-GATEWAY_REDIS_URL=redis://localhost:6381/0
-
-# Service Discovery
-AUTH_SERVICE_URL=https://localhost:8001
-
-# Rate Limiting Configuration
-RATE_LIMIT_ENABLED=true
-DEFAULT_RATE_LIMIT_REQUESTS=1000
-DEFAULT_RATE_LIMIT_WINDOW=60
-AUTHENTICATED_RATE_LIMIT_REQUESTS=5000
-AUTHENTICATED_RATE_LIMIT_WINDOW=60
-
-# Gateway Configuration
-GATEWAY_HOST=0.0.0.0
-GATEWAY_PORT=8000
-ENVIRONMENT=development
-
-# Security & Features
-JWT_VERIFICATION_ENABLED=true
-CIRCUIT_BREAKER_ENABLED=true
-METRICS_ENABLED=true
-ACCESS_LOG_ENABLED=true
-```
-
-## Development
 
 ### Running Tests
+
 ```bash
+# All tests
 pytest tests/
+
+# Specific test types
+pytest tests/ -m "unit"
+pytest tests/ -m "integration"
+pytest tests/ -m "e2e"
+pytest tests/ -m "performance"
+pytest tests/ -m "security"
+
+# With coverage
+pytest tests/ --cov=services --cov-report=html
 ```
 
-### Code Quality
+## 🚢 Deployment Options
+
+### 1. Docker Compose (Recommended for Development)
+
 ```bash
-black src/
-flake8 src/
-mypy src/
+# Development
+./infrastructure/scripts/deploy.sh docker development
+
+# Production
+./infrastructure/scripts/deploy.sh docker production
 ```
 
-## Production Deployment
+### 2. Kubernetes (Recommended for Production)
 
-1. **Update Security Settings**
-   - Change `JWT_SECRET_KEY` to a strong random value
-   - Set `DATABASE_URL` to production database
-   - Configure proper CORS origins
-
-2. **Deploy with Docker**
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+# Development
+./infrastructure/scripts/deploy.sh k8s development
+
+# Production with Linkerd
+./infrastructure/scripts/deploy.sh k8s production --linkerd
 ```
 
-3. **Health Monitoring**
-   - Monitor `/health` endpoints
-   - Check logs in `logs/` directory
-   - Set up alerts for service failures
+### 3. Service Mesh with Linkerd
 
-## Architecture
+```bash
+# Install Linkerd
+curl -sL https://run.linkerd.io/install | sh
+linkerd install --crds | kubectl apply -f -
+linkerd install | kubectl apply -f -
 
+# Deploy with mesh
+./infrastructure/scripts/deploy.sh k8s production --linkerd
 ```
-Client → API Gateway → Auth Service → Database
-                   → Other Services
+
+## 🔒 Security Features
+
+### Authentication & Authorization
+- **Server-side bcrypt hashing** with configurable rounds
+- **JWT token management** with blacklisting
+- **Failed login tracking** with account lockout
+- **Session management** with Redis caching
+- **Service mesh mTLS** for inter-service communication
+
+### Rate Limiting & Protection
+- **Sliding window rate limiting** with Redis
+- **Circuit breaker pattern** for fault tolerance
+- **Request validation** and input sanitization
+- **Security headers** via Caddy reverse proxy
+
+### Observability & Monitoring
+- **Structured logging** with correlation IDs
+- **Prometheus metrics** for performance monitoring
+- **Distributed tracing** with OpenTelemetry/Jaeger
+- **Health checks** and service status monitoring
+
+## 📊 Performance Features
+
+### Caching Strategy
+- **Response caching** for GET requests with configurable TTL
+- **User session caching** to reduce database load
+- **Service discovery caching** for improved routing
+- **Connection pooling** for databases and Redis
+
+### Optimization
+- **Database connection pooling** with SQLAlchemy
+- **Redis pipelining** for batch operations
+- **HTTP/2 support** via Caddy reverse proxy
+- **Compression** and static asset optimization
+
+## 🔄 CI/CD Integration
+
+The project is designed for enterprise CI/CD pipelines:
+
+```bash
+# Code quality pipeline
+make lint
+make test
+make security-scan
+
+# Build and deploy pipeline
+make build
+make deploy-staging
+make test-e2e
+make deploy-prod
 ```
 
-The API Gateway acts as a single entry point, handling authentication and routing requests to appropriate backend services.
+## 📈 Monitoring & Observability
+
+### Metrics (Prometheus)
+- HTTP request metrics (latency, throughput, errors)
+- Authentication metrics (login success/failure rates)
+- Database connection pool metrics
+- Cache hit/miss ratios
+- Rate limiting violations
+
+### Logging (Structured JSON)
+- Request/response logging with correlation IDs
+- Authentication events (login, logout, failures)
+- Database operations with timing
+- Cache operations and performance
+- Security events and violations
+
+### Tracing (Jaeger)
+- End-to-end request tracing across services
+- Database query tracing
+- Cache operation tracing
+- External API call tracing
+
+## 🛠️ Configuration
+
+Services use environment-based configuration with validation:
+
+```bash
+# Core settings
+SERVICE_NAME=auth-service
+ENVIRONMENT=production
+DEBUG=false
+
+# Database
+DATABASE_URL=postgresql://user:pass@host:port/db
+
+# Redis
+REDIS_URL=redis://host:port/db
+
+# Security
+JWT_SECRET_KEY=your-secret-key
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Observability
+LOG_LEVEL=INFO
+ENABLE_METRICS=true
+ENABLE_TRACING=true
+```
+
+## 🤝 Contributing
+
+1. **Code Quality**: All code must pass linting, formatting, and security scans
+2. **Testing**: Maintain test coverage above 90%
+3. **Documentation**: Update documentation for any architectural changes
+4. **Security**: Follow security best practices and run security tests
+
+```bash
+# Setup development environment
+make install-dev
+
+# Before committing
+make lint
+make test
+make security-scan
+```
+
+## 📚 Additional Documentation
+
+- [**IMPROVED_STRUCTURE.md**](IMPROVED_STRUCTURE.md) - Detailed structure improvements
+- [**LINKERD.md**](LINKERD.md) - Service mesh integration guide
+- [**Auth Service README**](src/auth_service/README.md) - Authentication service details
+- [**API Gateway README**](src/api-gateway/README.md) - Gateway service details
+
+## 🏆 Enterprise Features
+
+- ✅ **Microservices Architecture** with proper service isolation
+- ✅ **Service Mesh Integration** with Linkerd for automatic mTLS
+- ✅ **Shared Component Libraries** for code reuse and consistency
+- ✅ **Comprehensive Testing Strategy** (unit, integration, E2E, performance, security)
+- ✅ **Infrastructure as Code** with Docker, Kubernetes, and Terraform
+- ✅ **CI/CD Ready** with automated testing and deployment
+- ✅ **Enterprise Security** with authentication, authorization, and encryption
+- ✅ **Production Monitoring** with metrics, logging, and tracing
+- ✅ **High Availability** with auto-scaling and fault tolerance
+- ✅ **Development Experience** with automated tooling and documentation
+
+---
+
+Built with ❤️ using modern microservices best practices and enterprise-grade tooling.

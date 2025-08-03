@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: munshi
+
+resources:
+  - namespace.yaml
+  - auth-service.yaml
+  - api-gateway.yaml
+  - databases.yaml
+  - redis.yaml
+  - caddy-ingress.yaml
+  - linkerd-service-profiles.yaml
+  - monitoring.yaml
+
+commonLabels:
+  app.kubernetes.io/name: munshi
+  app.kubernetes.io/part-of: munshi-microservices
+
+images:
+  - name: munshi-auth-service
+    newTag: latest
+  - name: munshi-api-gateway
+    newTag: latest

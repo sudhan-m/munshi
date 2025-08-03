@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: auth-postgres
+spec:
+  template:
+    spec:
+      containers:
+      - name: postgres
+        env:
+        - name: POSTGRES_DB
+          value: "auth_db_dev"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gateway-postgres
+spec:
+  template:
+    spec:
+      containers:
+      - name: postgres
+        env:
+        - name: POSTGRES_DB
+          value: "gateway_db_dev"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"

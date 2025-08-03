@@ -1,11 +1,10 @@
 version: '3.8'
 
-# Complete microservices deployment with separate databases
 services:
-  # Auth Service Database
+  # PostgreSQL databases
   auth-postgres:
     image: postgres:15
-    container_name: auth-postgres
+    container_name: munshi-auth-postgres
     environment:
       POSTGRES_DB: auth_db
       POSTGRES_USER: auth_user
@@ -14,18 +13,18 @@ services:
       - "5433:5432"
     volumes:
       - auth_postgres_data:/var/lib/postgresql/data
+    networks:
+      - munshi-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - microservices-network
 
-  # Gateway Service Database
   gateway-postgres:
     image: postgres:15
-    container_name: gateway-postgres
+    container_name: munshi-gateway-postgres
     environment:
       POSTGRES_DB: gateway_db
       POSTGRES_USER: gateway_user
@@ -34,68 +33,76 @@ services:
       - "5434:5432"
     volumes:
       - gateway_postgres_data:/var/lib/postgresql/data
+    networks:
+      - munshi-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gateway_user -d gateway_db"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - microservices-network
 
-  # Auth Service Redis
+  # Redis instances
   auth-redis:
     image: redis:7-alpine
-    container_name: auth-redis
+    container_name: munshi-auth-redis
+    command: redis-server --appendonly yes --databases 16
     ports:
       - "6380:6379"
     volumes:
       - auth_redis_data:/data
+    networks:
+      - munshi-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - microservices-network
 
-  # Gateway Service Redis
   gateway-redis:
     image: redis:7-alpine
-    container_name: gateway-redis
+    container_name: munshi-gateway-redis
+    command: redis-server --appendonly yes --databases 16
     ports:
       - "6381:6379"
     volumes:
       - gateway_redis_data:/data
+    networks:
+      - munshi-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - microservices-network
 
-  # Auth Service
+  # Authentication Service
   auth-service:
     build:
-      context: ./src/auth_service
+      context: ../../services/auth-service
       dockerfile: Dockerfile
-    container_name: auth-service
-    expose:
-      - "8001"
+    container_name: munshi-auth-service
     environment:
-      - AUTH_DATABASE_URL=postgresql://auth_user:auth_password@auth-postgres:5432/auth_db
-      - AUTH_REDIS_URL=redis://auth-redis:6379/1
-      - JWT_SECRET_KEY=auth_service_production_secret_key_change_this
-      - ENVIRONMENT=production
-      - DEBUG=false
+      - ENVIRONMENT=development
+      - SERVICE_NAME=auth-service
+      - DATABASE_URL=postgresql://auth_user:auth_password@auth-postgres:5432/auth_db
+      - REDIS_URL=redis://auth-redis:6379/1
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-change-in-production
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - LOG_LEVEL=INFO
+      - HOST=0.0.0.0
+      - PORT=8001
+    ports:
+      - "8001:8001"
     depends_on:
       auth-postgres:
         condition: service_healthy
       auth-redis:
         condition: service_healthy
-    restart: unless-stopped
     networks:
-      - microservices-network
+      - munshi-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -105,20 +112,20 @@ services:
   # API Gateway
   api-gateway:
     build:
-      context: ./src/api-gateway
+      context: ../../services/api-gateway
       dockerfile: Dockerfile
-    container_name: api-gateway
-    expose:
-      - "8000"
+    container_name: munshi-api-gateway
     environment:
-      - GATEWAY_DATABASE_URL=postgresql://gateway_user:gateway_password@gateway-postgres:5432/gateway_db
-      - GATEWAY_REDIS_URL=redis://gateway-redis:6379/0
-      - AUTH_SERVICE_URL=https://auth-service:8001
-      - CA_CERT_PATH=/etc/caddy/certs/ca.crt
-      - CLIENT_CERT_PATH=/etc/caddy/certs/gateway.crt
-      - CLIENT_KEY_PATH=/etc/caddy/certs/gateway.key
-      - ENVIRONMENT=production
-      - DEBUG=false
+      - ENVIRONMENT=development
+      - SERVICE_NAME=api-gateway
+      - DATABASE_URL=postgresql://gateway_user:gateway_password@gateway-postgres:5432/gateway_db
+      - REDIS_URL=redis://gateway-redis:6379/0
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - HOST=0.0.0.0
+      - PORT=8000
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=1000
+    ports:
+      - "8000:8000"
     depends_on:
       gateway-postgres:
         condition: service_healthy
@@ -126,33 +133,31 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_healthy
-    restart: unless-stopped
     networks:
-      - microservices-network
-    volumes:
-      - caddy_data:/etc/caddy/certs:ro
+      - munshi-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Caddy Reverse Proxy (Ingress)
+  # Caddy Reverse Proxy
   caddy:
-    build:
-      context: ./src/api-gateway/caddy
-      dockerfile: Dockerfile
-    container_name: caddy
+    image: caddy:2-alpine
+    container_name: munshi-caddy
     ports:
       - "443:443"
       - "80:80"
-      - "2019:2019"  # Admin API
-    environment:
-      - ENVIRONMENT=production
-    depends_on:
-      api-gateway:
-        condition: service_started
-    restart: unless-stopped
-    networks:
-      - microservices-network
     volumes:
-      - caddy_data:/etc/caddy/certs
-      - caddy_config:/etc/caddy/config
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api-gateway
+    networks:
+      - munshi-network
+    restart: unless-stopped
 
 volumes:
   auth_postgres_data:
@@ -163,5 +168,8 @@ volumes:
   caddy_config:
 
 networks:
-  microservices-network:
+  munshi-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

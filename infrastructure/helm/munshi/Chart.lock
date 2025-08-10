@@ -1,0 +1,9 @@
+dependencies:
+- name: linkerd-control-plane
+  repository: https://helm.linkerd.io/stable
+  version: 1.16.11
+- name: linkerd-viz
+  repository: https://helm.linkerd.io/stable
+  version: 30.12.11
+digest: sha256:4441d3d39bed0df9d6d831be2288b246cc40306dab0ebbb5ac3692f1d7908876
+generated: "2025-08-11T00:46:54.277082+05:30"

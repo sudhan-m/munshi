@@ -7,43 +7,45 @@ This document outlines the complete structure of the Munshi microservices projec
 ```
 munshi/
 ├── README.md                           # Main project documentation
-├── PROJECT_STRUCTURE.md               # This file - project structure guide
-├── LINKERD.md                          # Linkerd service mesh integration guide
-├── DEPLOYMENT.md                       # Comprehensive deployment guide
-├── docker-compose.microservices.yml   # Traditional microservices deployment
-├── docker-compose.linkerd.yml         # Linkerd-compatible development deployment
-├── deploy.sh                           # Universal deployment script
-├── k8s/                               # Kubernetes manifests with Linkerd
-│   ├── namespace.yaml                 # Namespace with Linkerd injection
-│   ├── auth-service.yaml             # Auth service with service mesh
-│   ├── api-gateway.yaml              # API gateway with service mesh
-│   ├── caddy-ingress.yaml            # Caddy ingress controller
-│   ├── linkerd-service-profiles.yaml # Service profiles for traffic management
-│   ├── monitoring.yaml               # Observability configuration
-│   └── *.yaml                        # Database and Redis deployments
-├── linkerd/                          # Linkerd installation and configuration
-│   └── linkerd-install.sh            # Automated Linkerd installation
-└── src/                              # Source code directory
-    ├── auth_service/                 # Authentication microservice
-    └── api-gateway/                  # API Gateway microservice
+├── Makefile                           # Simplified development commands
+├── .env.example                       # Environment variables template
+├── .gitignore                         # Git ignore patterns
+├── scripts/
+│   └── deploy.sh                      # Universal deployment script (replaces all others)
+├── infrastructure/
+│   └── helm/                          # Helm charts for Kubernetes deployment
+│       └── munshi/                    # Main Munshi chart
+│           ├── Chart.yaml             # Chart metadata with Linkerd dependencies
+│           ├── values.yaml            # Production defaults (all cloud environments)
+│           ├── values-local.yaml      # Docker Desktop overrides
+│           └── templates/             # Kubernetes resource templates
+├── services/
+│   ├── api-gateway/                   # API Gateway microservice
+│   ├── auth-service/                  # Authentication microservice
+│   └── shared/                        # Shared libraries and utilities
+├── tests/
+│   ├── conftest.py                    # Test configuration and fixtures
+│   ├── e2e/                           # End-to-end tests
+│   └── performance/                   # Load and performance tests
+└── docs/
+    ├── architecture/                  # Architecture documentation
+    ├── CONFIGURATION.md               # Configuration guide
+    └── LINKERD_AUTHORIZATION.md       # Service mesh authorization
 ```
 
-## Authentication Service (`src/auth_service/`)
+## Authentication Service (`services/auth-service/`)
 
 ```
-src/auth_service/
+services/auth-service/
 ├── __init__.py                  # Package initialization
 ├── main.py                      # FastAPI application and endpoints
-├── models.py                    # SQLAlchemy and Pydantic models
-├── database.py                  # Database configuration and session management
 ├── auth.py                      # Authentication utilities and password hashing
 ├── cache.py                     # Redis cache utilities and session management
-├── config.py                    # Configuration loader wrapper
-├── config.json                  # Application behavior and business logic settings
-├── requirements.txt             # Python dependencies for auth service
-├── .env.example                 # Environment variables template
-├── Dockerfile                   # Docker image configuration
-└── docker-compose.yml           # Standalone deployment configuration
+├── config.py                    # Configuration management
+├── database.py                  # Database configuration and session management
+├── requirements.txt             # Python dependencies
+├── Dockerfile                   # Multi-stage Docker build
+└── README.md                    # Service documentation
 ```
 
 ### Authentication Service Features
@@ -58,28 +60,20 @@ src/auth_service/
 - **Dedicated Redis**: Redis on port 6380 (database 1) for security and session features
 - **Independent Deployment**: Can be deployed separately from other services
 
-## API Gateway Service (`src/api-gateway/`)
+## API Gateway Service (`services/api-gateway/`)
 
 ```
-src/api-gateway/
+services/api-gateway/
 ├── __init__.py                  # Package initialization
 ├── main.py                      # FastAPI application and main routes
 ├── router.py                    # Request routing and service discovery
 ├── middleware.py                # Authentication, rate limiting, and caching middleware
 ├── cache.py                     # Redis cache utilities for performance and rate limiting
 ├── database.py                  # Database models and connection management
-├── config.py                    # Configuration loader wrapper
-├── config.json                  # Application behavior and business logic settings
-├── requirements.txt             # Python dependencies for gateway
-├── .env.example                 # Environment variables template
-├── Dockerfile                   # Docker image configuration
-├── docker-compose.yml           # Standalone deployment configuration
-└── caddy/                       # Reverse proxy and TLS termination
-    ├── Caddyfile                # Optimized Caddy configuration
-    ├── Dockerfile               # Caddy container setup
-    ├── README.md                # Caddy setup documentation
-    ├── docker-entrypoint.sh     # Container initialization script
-    └── generate-certs.sh        # TLS certificate generation
+├── config.py                    # Configuration management
+├── requirements.txt             # Python dependencies
+├── Dockerfile                   # Multi-stage Docker build
+└── README.md                    # Service documentation
 ```
 
 ### API Gateway Features

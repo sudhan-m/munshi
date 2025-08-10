@@ -10,41 +10,51 @@ This directory contains Helm charts for deploying the Munshi microservices platf
 
 ## Quick Start
 
-### Local Development (Docker Desktop)
+The universal deployment script automatically detects your environment and deploys accordingly:
+
 ```bash
-# Deploy to Docker Desktop with auto image builds and port forwarding
-./scripts/deploy-local.sh
+# Universal deployment - auto-detects environment and deploys
+./scripts/deploy.sh
 
-# Just build images
-./scripts/deploy-local.sh build
+# Build images only (local environments)
+./scripts/deploy.sh build
 
-# Check status
-./scripts/deploy-local.sh status
-```
+# Check deployment status
+./scripts/deploy.sh status
 
-### Cloud Deployment (AWS/GCP/Azure)
-```bash
-# Deploy to production
-./scripts/deploy-cloud.sh
-
-# Deploy to staging
-ENVIRONMENT=dev ./scripts/deploy-cloud.sh
-
-# Deploy to development
-ENVIRONMENT=staging ./scripts/deploy-cloud.sh
+# View application logs
+./scripts/deploy.sh logs
 
 # Upgrade existing deployment
-./scripts/deploy-cloud.sh upgrade
+./scripts/deploy.sh upgrade
 ```
+
+### Environment Override
+```bash
+# Force specific environment (overrides auto-detection)
+ENVIRONMENT=staging ./scripts/deploy.sh
+
+# Force image building
+BUILD_IMAGES=true ./scripts/deploy.sh
+
+# Custom namespace
+NAMESPACE=my-munshi ./scripts/deploy.sh
+```
+
+## Environment Detection
+
+The deployment script automatically detects your environment:
+
+- **Local**: Docker Desktop context (`docker-desktop`) or localhost clusters
+- **Cloud**: Production, staging, or development based on context/cluster names
+- **Fallback**: Unknown cloud environments default to production settings
 
 ## Configuration Files
 
 | File | Purpose |
 |------|---------|
-| `values.yaml` | Default production values |
-| `values-local.yaml` | Local development overrides |
-| `values-dev.yaml` | Development/staging environment |
-| `values-prod.yaml` | Production-specific overrides |
+| `values.yaml` | Production defaults (used for all cloud environments) |
+| `values-local.yaml` | Local development overrides (Docker Desktop) |
 
 ## Key Features
 
@@ -83,14 +93,14 @@ If you prefer manual deployment:
 helm install munshi ./infrastructure/helm/munshi \
   --namespace munshi-prod \
   --create-namespace \
-  --values ./infrastructure/helm/munshi/values-prod.yaml
+  --values ./infrastructure/helm/munshi/values.yaml
 ```
 
 ### Upgrade
 ```bash
 helm upgrade munshi ./infrastructure/helm/munshi \
   --namespace munshi-prod \
-  --values ./infrastructure/helm/munshi/values-prod.yaml
+  --values ./infrastructure/helm/munshi/values.yaml
 ```
 
 ### Uninstall
@@ -185,17 +195,20 @@ linkerd edges -n munshi-prod
 
 ## Development
 
-For local development with hot reloading:
-
-1. Build and tag images locally
-2. Use `values-local.yaml` with `imagePullPolicy: Never`
-3. Deploy with local configuration
+The universal deployment script handles local development automatically:
 
 ```bash
-# Build images
-docker build -t munshi/api-gateway:latest ./services/api-gateway/
-docker build -t munshi/auth-service:latest ./services/auth-service/
+# Automatically builds images and deploys with port forwarding
+./scripts/deploy.sh
 
-# Deploy locally
-ENVIRONMENT=local ./scripts/deploy.sh
+# Access your application
+open http://localhost:8000
+
+# Access Linkerd dashboard (if enabled)  
+open http://localhost:50750
+```
+
+For manual image building:
+```bash
+./scripts/deploy.sh build
 ```

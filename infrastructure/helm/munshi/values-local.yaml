@@ -7,8 +7,8 @@ global:
   imagePullPolicy: Never
 
 # Environment
-environment: development
-namespace: munshi-dev
+environment: local
+namespace: munshi-local
 
 # Replica counts (reduced for local development)
 replicaCount:
@@ -48,10 +48,10 @@ resources:
       memory: "64Mi"
       cpu: "50m"
 
-# Development environment variables
+# Local development environment variables
 env:
   apiGateway:
-    ENVIRONMENT: "development"
+    ENVIRONMENT: "local"
     DEBUG: "true"
     GATEWAY_HOST: "0.0.0.0"
     GATEWAY_PORT: "8000"
@@ -59,14 +59,14 @@ env:
     JWT_VERIFICATION_ENABLED: "true"
     CIRCUIT_BREAKER_ENABLED: "false"  # Disable for easier development
   authService:
-    ENVIRONMENT: "development"
+    ENVIRONMENT: "local"
     DEBUG: "true"
     AUTH_SERVICE_HOST: "0.0.0.0"
     AUTH_SERVICE_PORT: "8001"
 
-# Linkerd service mesh for local development
+# Linkerd service mesh for local development (disabled initially)
 linkerd:
-  enabled: true
+  enabled: false  # Disable for simpler local setup
   controlPlane:
     identity:
       issuer:
@@ -80,7 +80,7 @@ linkerd:
           request: "20Mi"
           limit: "50Mi"
   viz:
-    enabled: true
+    enabled: false
     dashboard:
       enabled: true
     prometheus:

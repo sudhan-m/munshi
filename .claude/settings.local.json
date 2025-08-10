@@ -36,7 +36,14 @@
       "Bash(pkill:*)",
       "Bash(pytest:*)",
       "Bash(pip install:*)",
-      "Bash(helm list:*)"
+      "Bash(helm list:*)",
+      "Bash(make:*)",
+      "Bash(./scripts/deploy.sh:*)",
+      "Bash(NAMESPACE=test-ns VALUES_FILE=test-values.yaml bash -c 'echo \"\"NAMESPACE: $NAMESPACE, VALUES_FILE: $VALUES_FILE\"\"')",
+      "Bash(./test-simple-deploy.sh:*)",
+      "Bash(timeout 300 make deploy)",
+      "Bash(helm get manifest:*)",
+      "Bash(helm get values:*)"
     ],
     "deny": []
   },

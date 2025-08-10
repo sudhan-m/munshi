@@ -113,28 +113,23 @@ setup_environment() {
         detected_env=$ENVIRONMENT
     fi
     
-    # Set namespace
+    # Set namespace (make it global)
     if [[ -z "$NAMESPACE" ]]; then
         NAMESPACE="munshi-${detected_env}"
     fi
     
-    # Set values file
+    # Set values file (make it global)
     case "$detected_env" in
         "local")
             VALUES_FILE="values-local.yaml"
             ;;
-        "dev")
-            VALUES_FILE="values-dev.yaml"
-            ;;
-        "staging")
-            VALUES_FILE="values-dev.yaml"  # Reuse dev values for staging
-            ;;
-        "prod")
-            VALUES_FILE="values.yaml"  # Default production values
+        *)
+            VALUES_FILE="values.yaml"  # Default production values for all non-local
             ;;
     esac
     
-    echo "$detected_env"
+    # Set global environment variable for other functions to use
+    FINAL_ENV="$detected_env"
 }
 
 # Validate environment and dependencies
@@ -143,11 +138,13 @@ validate_environment() {
     
     local context=$(kubectl config current-context)
     local detected_env=$(detect_environment)
-    local final_env=$(setup_environment "$detected_env")
+    
+    # Call setup_environment to set globals
+    setup_environment "$detected_env"
     
     info "Kubernetes context: $context"
     info "Detected environment: $detected_env"
-    info "Final environment: $final_env"
+    info "Final environment: $FINAL_ENV"
     info "Namespace: $NAMESPACE"
     info "Values file: $VALUES_FILE"
     
@@ -160,7 +157,7 @@ validate_environment() {
         error "kubectl is not installed. Please install kubectl first."
     fi
     
-    if [[ "$final_env" == "local" ]] && ! command -v docker &> /dev/null; then
+    if [[ "$FINAL_ENV" == "local" ]] && ! command -v docker &> /dev/null; then
         error "Docker is not installed. Please install Docker Desktop first."
     fi
     
@@ -176,7 +173,6 @@ validate_environment() {
     fi
     
     log "Environment validation completed ✓"
-    echo "$final_env"
 }
 
 # Build Docker images (for local development)
@@ -188,7 +184,7 @@ build_images() {
     # Build API Gateway
     if [[ -f "services/api-gateway/Dockerfile" ]]; then
         log "Building API Gateway image..."
-        docker build -t munshi/api-gateway:latest ./services/api-gateway/
+        docker build -t munshi/api-gateway:latest -f services/api-gateway/Dockerfile ./services/
     else
         warn "API Gateway Dockerfile not found, skipping build"
     fi
@@ -196,7 +192,7 @@ build_images() {
     # Build Auth Service  
     if [[ -f "services/auth-service/Dockerfile" ]]; then
         log "Building Auth Service image..."
-        docker build -t munshi/auth-service:latest ./services/auth-service/
+        docker build -t munshi/auth-service:latest -f services/auth-service/Dockerfile ./services/
     else
         warn "Auth Service Dockerfile not found, skipping build"
     fi
@@ -228,6 +224,7 @@ update_dependencies() {
     helm dependency update "$CHART_PATH"
     log "Helm dependencies updated ✓"
 }
+
 
 # Setup port forwarding for local environments
 setup_port_forwarding() {
@@ -278,8 +275,7 @@ deploy() {
     add_helm_repos "$env"
     update_dependencies
     
-    # Create namespace if it doesn't exist
-    kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+    # Let Helm create and manage the namespace
     
     # Deploy with Helm
     local timeout="10m"
@@ -289,6 +285,7 @@ deploy() {
     
     helm upgrade --install munshi "$CHART_PATH" \
         --namespace "$NAMESPACE" \
+        --create-namespace \
         --values "$CHART_PATH/$VALUES_FILE" \
         --wait \
         --timeout "$timeout" \
@@ -368,13 +365,13 @@ show_info() {
 
 # Main execution
 main() {
-    local env=$(validate_environment)
-    
     log "🚀 Starting Munshi deployment..."
     
-    deploy "$env"
-    verify_deployment "$env"
-    show_info "$env"
+    validate_environment
+    
+    deploy "$FINAL_ENV"
+    verify_deployment "$FINAL_ENV"
+    show_info "$FINAL_ENV"
     
     log "🎉 Deployment successful!"
 }
@@ -385,8 +382,8 @@ case "${1:-deploy}" in
         main
         ;;
     "build")
-        local env=$(validate_environment)
-        if [[ "$env" == "local" ]]; then
+        validate_environment
+        if [[ "$FINAL_ENV" == "local" ]]; then
             build_images
             log "Image builds completed! Run '$0' to deploy."
         else
@@ -395,32 +392,32 @@ case "${1:-deploy}" in
         ;;
     "upgrade")
         log "Upgrading existing deployment..."
-        local env=$(validate_environment)
-        deploy "$env"
-        verify_deployment "$env"
-        show_info "$env"
+        validate_environment
+        deploy "$FINAL_ENV"
+        verify_deployment "$FINAL_ENV"
+        show_info "$FINAL_ENV"
         ;;
     "status")
-        local env=$(validate_environment)
+        validate_environment
         helm status munshi -n "$NAMESPACE"
         kubectl get all -n "$NAMESPACE"
         ;;
     "logs")
-        local env=$(validate_environment)
+        validate_environment
         kubectl logs -n "$NAMESPACE" -l app.kubernetes.io/name=munshi --tail=100 -f
         ;;
     "rollback")
-        local env=$(validate_environment)
+        validate_environment
         log "Rolling back deployment..."
         helm rollback munshi -n "$NAMESPACE"
         kubectl rollout status deployment -n "$NAMESPACE"
         ;;
     "delete"|"uninstall")
-        local env=$(validate_environment)
+        validate_environment
         log "Removing deployment..."
         helm uninstall munshi -n "$NAMESPACE" || true
         
-        if [[ "$env" == "local" ]]; then
+        if [[ "$FINAL_ENV" == "local" ]]; then
             # Stop port forwarding for local
             pkill -f "kubectl port-forward.*munshi" || true
             pkill -f "kubectl port-forward.*linkerd" || true

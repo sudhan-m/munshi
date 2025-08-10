@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "munshi.apiGatewayLabels" . | nindent 4 }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "munshi.apiGatewayLabels" . | nindent 4 }}
+  annotations:
+    {{- include "munshi.linkerdAnnotations" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.apiGateway }}
+  selector:
+    matchLabels:
+      app: api-gateway
+      {{- include "munshi.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        version: v1
+        {{- include "munshi.apiGatewayLabels" . | nindent 8 }}
+      annotations:
+        {{- include "munshi.linkerdAnnotations" . | nindent 8 }}
+        {{- if .Values.linkerd.enabled }}
+        config.linkerd.io/proxy-require-identity-on-inbound-ports: "8000"
+        config.linkerd.io/default-inbound-policy: "allow-unauthenticated"
+        {{- end }}
+    spec:
+      serviceAccountName: api-gateway
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+      - name: api-gateway
+        image: {{ include "munshi.apiGatewayImage" . }}
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: GATEWAY_DATABASE_URL
+          value: "postgresql://gateway_user:{{ .Values.secrets.postgres.gatewayPassword }}@postgres-gateway:5432/gateway_db"
+        - name: GATEWAY_REDIS_URL
+          value: "redis://redis-gateway:6379/0"
+        - name: AUTH_SERVICE_URL
+          value: "http://auth-service.{{ .Values.namespace }}.svc.cluster.local:8001"
+        {{- range $key, $value := .Values.env.apiGateway }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.resources.apiGateway | nindent 10 }}
+        livenessProbe:
+          {{- toYaml .Values.healthcheck.apiGateway.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.healthcheck.apiGateway.readinessProbe | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "munshi.apiGatewayLabels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.linkerd.enabled }}
+    linkerd.io/inject: {{ .Values.linkerd.inject.default }}
+    mirror.linkerd.io/exported: "true"
+    {{- end }}
+spec:
+  type: {{ .Values.services.apiGateway.type }}
+  ports:
+  - name: http
+    port: {{ .Values.services.apiGateway.port }}
+    targetPort: 8000
+  selector:
+    app: api-gateway
+    {{- include "munshi.selectorLabels" . | nindent 4 }}

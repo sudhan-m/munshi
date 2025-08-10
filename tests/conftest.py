@@ -23,7 +23,7 @@ from services.shared.auth import JWTHandler
 from services.shared.cache import RedisClient
 from services.shared.database import DatabaseManager
 from services.shared.observability import setup_logging, MetricsCollector
-from services.shared.config import BaseServiceSettings
+from services.shared.config import get_config
 
 
 @pytest.fixture(scope="session")
@@ -35,12 +35,12 @@ def event_loop():
 
 
 @pytest.fixture(scope="session")
-def test_settings() -> BaseServiceSettings:
+def test_settings():
     """
-    Test settings configuration.
+    Test settings configuration using new config system.
     
     Returns:
-        Test settings with safe defaults
+        Test configuration object with safe defaults
     """
     # Create temporary database for testing
     temp_dir = tempfile.mkdtemp()
@@ -48,17 +48,21 @@ def test_settings() -> BaseServiceSettings:
     
     # Override environment variables for testing
     test_env = {
-        "SERVICE_NAME": "test-service",
-        "SERVICE_VERSION": "1.0.0-test",
         "ENVIRONMENT": "testing",
         "DEBUG": "true",
-        "DATABASE_URL": f"sqlite:///{test_db_path}",
-        "REDIS_URL": "redis://localhost:6379/15",  # Use test database
+        "AUTH_DATABASE_URL": f"sqlite:///{test_db_path}",
+        "GATEWAY_DATABASE_URL": f"sqlite:///{test_db_path}",
+        "AUTH_REDIS_URL": "redis://localhost:6379/15",  # Use test database
+        "GATEWAY_REDIS_URL": "redis://localhost:6379/14",
         "JWT_SECRET_KEY": "test-secret-key-for-testing-only-32chars",
         "ACCESS_TOKEN_EXPIRE_MINUTES": "5",  # Short expiry for tests
         "LOG_LEVEL": "DEBUG",
         "ENABLE_METRICS": "false",
-        "ENABLE_TRACING": "false"
+        "ENABLE_TRACING": "false",
+        "AUTH_SERVICE_HOST": "127.0.0.1",
+        "AUTH_SERVICE_PORT": "8001",
+        "GATEWAY_HOST": "127.0.0.1",
+        "GATEWAY_PORT": "8000"
     }
     
     # Temporarily set environment variables
@@ -68,7 +72,18 @@ def test_settings() -> BaseServiceSettings:
         os.environ[key] = value
     
     try:
-        settings = BaseServiceSettings()
+        # Create a simple test settings object
+        class TestSettings:
+            def __init__(self):
+                self.host = "127.0.0.1"
+                self.port = 8000
+                self.database_url = test_env["AUTH_DATABASE_URL"]
+                self.redis_url = test_env["AUTH_REDIS_URL"]
+                self.jwt_secret_key = test_env["JWT_SECRET_KEY"]
+                self.jwt_algorithm = "HS256"
+                self.access_token_expire_minutes = 5
+        
+        settings = TestSettings()
         yield settings
     finally:
         # Restore original environment
@@ -88,9 +103,9 @@ def jwt_handler(test_settings) -> JWTHandler:
         Configured JWT handler instance
     """
     return JWTHandler(
-        secret_key=test_settings.security.jwt_secret_key,
-        algorithm=test_settings.security.jwt_algorithm,
-        expire_minutes=test_settings.security.access_token_expire_minutes
+        secret_key=test_settings.jwt_secret_key,
+        algorithm=test_settings.jwt_algorithm,
+        expire_minutes=test_settings.access_token_expire_minutes
     )
 
 

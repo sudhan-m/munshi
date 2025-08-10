@@ -1,17 +1,14 @@
-# Makefile for Munshi microservices project
-# Provides common development tasks and deployment shortcuts
+# Munshi Microservices - Helm Deployment
 
-.PHONY: help install dev build test lint format clean deploy status logs docs
-
-# Default target
+.PHONY: help install dev build test lint format clean deploy status logs
 .DEFAULT_GOAL := help
 
 # Variables
 PYTHON_VERSION := 3.11
-POETRY := poetry
-DOCKER_COMPOSE := docker-compose
-KUBECTL := kubectl
-LINKERD := linkerd
+POETRY := ~/.local/bin/poetry
+GITHUB_USERNAME ?= your-username
+PROJECT_NAME := munshi
+TAG ?= latest
 
 # Colors for output
 BLUE := \033[36m
@@ -21,41 +18,109 @@ YELLOW := \033[33m
 NC := \033[0m
 
 help: ## Show this help message
-	@echo "$(BLUE)Munshi Microservices$(NC)"
+	@echo "$(BLUE)Munshi Microservices - Helm Deployment$(NC)"
 	@echo "Available commands:"
 	@echo
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
+
+# =============================================================================
+# DEVELOPMENT SETUP
+# =============================================================================
 
 install: ## Install project dependencies
 	@echo "$(BLUE)Installing dependencies...$(NC)"
 	$(POETRY) install --with dev,test
 	@echo "$(GREEN)Dependencies installed successfully$(NC)"
 
-install-dev: ## Install development dependencies
-	@echo "$(BLUE)Installing development dependencies...$(NC)"
+install-dev: ## Install development dependencies with pre-commit
+	@echo "$(BLUE)Installing development environment...$(NC)"
 	$(POETRY) install --with dev,test
-	pre-commit install
+	$(POETRY) run pre-commit install
 	@echo "$(GREEN)Development environment ready$(NC)"
 
-dev: ## Start development environment with Docker Compose
-	@echo "$(BLUE)Starting development environment...$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d
-	@echo "$(GREEN)Development environment started$(NC)"
-	@echo "Services available at:"
-	@echo "  - Auth Service: http://localhost:8001"
-	@echo "  - API Gateway: http://localhost:8000"
-	@echo "  - Adminer: http://localhost:8080"
-	@echo "  - Redis Commander: http://localhost:8081"
+init: ## Initialize project for first-time setup
+	@echo "$(BLUE)Initializing project...$(NC)"
+	@make install-dev
+	@echo "$(GREEN)Project initialized successfully$(NC)"
+	@echo "$(YELLOW)Next steps:$(NC)"
+	@echo "  1. Run 'make deploy' to deploy to current Kubernetes context"
+	@echo "  2. Run 'make status' to check deployment status"
 
-dev-linkerd: ## Start development environment with Linkerd
-	@echo "$(BLUE)Starting development environment with Linkerd...$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.linkerd.yml up -d
-	@echo "$(GREEN)Development environment with Linkerd started$(NC)"
+# =============================================================================
+# UNIVERSAL DEPLOYMENT
+# =============================================================================
 
-build: ## Build Docker images
-	@echo "$(BLUE)Building Docker images...$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) build
-	@echo "$(GREEN)Docker images built successfully$(NC)"
+deploy: ## Deploy to current Kubernetes context (auto-detects environment)
+	@echo "$(BLUE)🚀 Deploying to current Kubernetes context...$(NC)"
+	@./scripts/deploy.sh
+
+deploy-local: ## Force local environment deployment
+	@echo "$(BLUE)🏠 Deploying to local environment...$(NC)"
+	@ENVIRONMENT=local ./scripts/deploy.sh
+
+deploy-dev: ## Force development environment deployment
+	@echo "$(BLUE)🔧 Deploying to development environment...$(NC)"
+	@ENVIRONMENT=dev ./scripts/deploy.sh
+
+deploy-staging: ## Force staging environment deployment
+	@echo "$(BLUE)🎭 Deploying to staging environment...$(NC)"
+	@ENVIRONMENT=staging ./scripts/deploy.sh
+
+deploy-prod: ## Force production environment deployment
+	@echo "$(BLUE)🏭 Deploying to production environment...$(NC)"
+	@ENVIRONMENT=prod ./scripts/deploy.sh
+
+build: ## Build images (local only)
+	@echo "$(BLUE)🔨 Building images...$(NC)"
+	@./scripts/deploy.sh build
+
+upgrade: ## Upgrade existing deployment
+	@echo "$(BLUE)⬆️  Upgrading deployment...$(NC)"
+	@./scripts/deploy.sh upgrade
+
+rollback: ## Rollback deployment
+	@echo "$(BLUE)⏪ Rolling back deployment...$(NC)"
+	@./scripts/deploy.sh rollback
+
+stop: ## Stop port forwarding (local only)
+	@echo "$(BLUE)⏹️  Stopping port forwarding...$(NC)"
+	@./scripts/deploy.sh stop
+
+clean: ## Remove deployment
+	@echo "$(BLUE)🧹 Removing deployment...$(NC)"
+	@./scripts/deploy.sh delete
+
+# =============================================================================
+# IMAGE MANAGEMENT
+# =============================================================================
+
+build-cloud: ## Build images for cloud deployment
+	@echo "$(BLUE)🔨 Building cloud images...$(NC)"
+	@if [ "$(GITHUB_USERNAME)" = "your-username" ]; then \
+		echo "$(RED)❌ Please set GITHUB_USERNAME: make build-cloud GITHUB_USERNAME=your-github-username$(NC)"; \
+		exit 1; \
+	fi
+	@docker build -t ghcr.io/$(GITHUB_USERNAME)/$(PROJECT_NAME)/api-gateway:$(TAG) services/api-gateway/
+	@docker build -t ghcr.io/$(GITHUB_USERNAME)/$(PROJECT_NAME)/auth-service:$(TAG) services/auth-service/
+	@echo "$(GREEN)Cloud images built$(NC)"
+
+push-cloud: build-cloud ## Build and push images to GitHub Container Registry
+	@echo "$(BLUE)📤 Pushing images to GitHub Container Registry...$(NC)"
+	@docker push ghcr.io/$(GITHUB_USERNAME)/$(PROJECT_NAME)/api-gateway:$(TAG)
+	@docker push ghcr.io/$(GITHUB_USERNAME)/$(PROJECT_NAME)/auth-service:$(TAG)
+	@echo "$(GREEN)Images pushed to GitHub Container Registry$(NC)"
+
+clean-images: ## Clean up local Docker images
+	@echo "$(BLUE)🧹 Cleaning local images...$(NC)"
+	@docker rmi $(PROJECT_NAME)/api-gateway:latest 2>/dev/null || true
+	@docker rmi $(PROJECT_NAME)/auth-service:latest 2>/dev/null || true
+	@docker rmi ghcr.io/$(GITHUB_USERNAME)/$(PROJECT_NAME)/api-gateway:$(TAG) 2>/dev/null || true
+	@docker rmi ghcr.io/$(GITHUB_USERNAME)/$(PROJECT_NAME)/auth-service:$(TAG) 2>/dev/null || true
+	@echo "$(GREEN)Images cleaned$(NC)"
+
+# =============================================================================
+# TESTING
+# =============================================================================
 
 test: ## Run all tests
 	@echo "$(BLUE)Running tests...$(NC)"
@@ -77,15 +142,9 @@ test-e2e: ## Run end-to-end tests
 	$(POETRY) run pytest tests/ -m "e2e" -v
 	@echo "$(GREEN)End-to-end tests completed$(NC)"
 
-test-performance: ## Run performance tests
-	@echo "$(BLUE)Running performance tests...$(NC)"
-	$(POETRY) run pytest tests/ -m "performance" -v
-	@echo "$(GREEN)Performance tests completed$(NC)"
-
-test-security: ## Run security tests
-	@echo "$(BLUE)Running security tests...$(NC)"
-	$(POETRY) run pytest tests/ -m "security" -v
-	@echo "$(GREEN)Security tests completed$(NC)"
+# =============================================================================
+# CODE QUALITY
+# =============================================================================
 
 lint: ## Run linting checks
 	@echo "$(BLUE)Running linting checks...$(NC)"
@@ -107,135 +166,80 @@ security-scan: ## Run security scans
 	$(POETRY) run safety check
 	@echo "$(GREEN)Security scans completed$(NC)"
 
-clean: ## Clean up containers and volumes
-	@echo "$(BLUE)Cleaning up...$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) down -v
-	docker system prune -f
-	@echo "$(GREEN)Cleanup completed$(NC)"
+# =============================================================================
+# HELM UTILITIES
+# =============================================================================
 
-deploy-dev: ## Deploy to development environment
-	@echo "$(BLUE)Deploying to development...$(NC)"
-	./infrastructure/scripts/deploy.sh docker development
-	@echo "$(GREEN)Development deployment completed$(NC)"
+helm-deps: ## Update Helm dependencies
+	@echo "$(BLUE)Updating Helm dependencies...$(NC)"
+	@helm dependency update infrastructure/helm/munshi
+	@echo "$(GREEN)Helm dependencies updated$(NC)"
 
-deploy-staging: ## Deploy to staging environment
-	@echo "$(BLUE)Deploying to staging...$(NC)"
-	./infrastructure/scripts/deploy.sh k8s staging
-	@echo "$(GREEN)Staging deployment completed$(NC)"
+helm-lint: ## Lint Helm charts
+	@echo "$(BLUE)Linting Helm charts...$(NC)"
+	@helm lint infrastructure/helm/munshi
+	@echo "$(GREEN)Helm charts linted$(NC)"
 
-deploy-prod: ## Deploy to production environment
-	@echo "$(YELLOW)WARNING: Deploying to production$(NC)"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		./infrastructure/scripts/deploy.sh k8s production --linkerd; \
-		echo "$(GREEN)Production deployment completed$(NC)"; \
-	else \
-		echo "$(RED)Production deployment cancelled$(NC)"; \
-	fi
+helm-template: ## Generate Helm templates (dry-run)
+	@echo "$(BLUE)Generating Helm templates...$(NC)"
+	@helm template munshi infrastructure/helm/munshi -f infrastructure/helm/munshi/values-local.yaml
 
-status: ## Show service status
-	@echo "$(BLUE)Service status:$(NC)"
-	@if command -v docker &> /dev/null; then \
-		echo "$(BLUE)Docker services:$(NC)"; \
-		cd infrastructure/docker && $(DOCKER_COMPOSE) ps; \
-	fi
-	@if command -v kubectl &> /dev/null && kubectl cluster-info &> /dev/null; then \
-		echo "$(BLUE)Kubernetes services:$(NC)"; \
-		$(KUBECTL) get all -n munshi-dev 2>/dev/null || echo "No development namespace found"; \
-		$(KUBECTL) get all -n munshi-staging 2>/dev/null || echo "No staging namespace found"; \
-		$(KUBECTL) get all -n munshi-prod 2>/dev/null || echo "No production namespace found"; \
-	fi
+# =============================================================================
+# MONITORING & UTILITIES
+# =============================================================================
 
-logs: ## Show service logs
-	@echo "$(BLUE)Service logs:$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) logs -f --tail=100
+status: ## Show deployment status
+	@echo "$(BLUE)📊 Deployment Status:$(NC)"
+	@./scripts/deploy.sh status
 
-logs-auth: ## Show auth service logs
-	@echo "$(BLUE)Auth service logs:$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) logs -f --tail=100 auth-service
-
-logs-gateway: ## Show gateway logs
-	@echo "$(BLUE)Gateway logs:$(NC)"
-	cd infrastructure/docker && $(DOCKER_COMPOSE) logs -f --tail=100 api-gateway
-
-metrics: ## Open metrics dashboards
-	@echo "$(BLUE)Opening metrics dashboards...$(NC)"
-	@if command -v open &> /dev/null; then \
-		open http://localhost:9090 & \
-		open http://localhost:3000 & \
-		open http://localhost:16686 & \
-	else \
-		echo "Metrics available at:"; \
-		echo "  - Prometheus: http://localhost:9090"; \
-		echo "  - Grafana: http://localhost:3000"; \
-		echo "  - Jaeger: http://localhost:16686"; \
-	fi
-
-linkerd-check: ## Check Linkerd installation
-	@echo "$(BLUE)Checking Linkerd...$(NC)"
-	@if command -v linkerd &> /dev/null; then \
-		$(LINKERD) check; \
-		$(LINKERD) viz check; \
-	else \
-		echo "$(RED)Linkerd CLI not installed$(NC)"; \
-	fi
-
-linkerd-dashboard: ## Open Linkerd dashboard
-	@echo "$(BLUE)Opening Linkerd dashboard...$(NC)"
-	$(LINKERD) viz dashboard &
-
-docs: ## Generate and serve documentation
-	@echo "$(BLUE)Serving documentation...$(NC)"
-	@if command -v mkdocs &> /dev/null; then \
-		mkdocs serve; \
-	else \
-		echo "$(YELLOW)mkdocs not installed. Install with: pip install mkdocs$(NC)"; \
-		echo "Documentation available in docs/ directory"; \
-	fi
-
-migrate: ## Run database migrations
-	@echo "$(BLUE)Running database migrations...$(NC)"
-	# Add migration commands here when implemented
-	@echo "$(GREEN)Migrations completed$(NC)"
-
-seed: ## Seed databases with test data
-	@echo "$(BLUE)Seeding databases...$(NC)"
-	# Add seeding commands here when implemented
-	@echo "$(GREEN)Database seeding completed$(NC)"
-
-backup: ## Backup databases
-	@echo "$(BLUE)Creating database backups...$(NC)"
-	# Add backup commands here when implemented
-	@echo "$(GREEN)Backup completed$(NC)"
+logs: ## Show application logs
+	@echo "$(BLUE)📝 Application Logs:$(NC)"
+	@./scripts/deploy.sh logs
 
 health: ## Check service health
-	@echo "$(BLUE)Checking service health...$(NC)"
-	@curl -s http://localhost:8001/health 2>/dev/null && echo "$(GREEN)Auth service: healthy$(NC)" || echo "$(RED)Auth service: unhealthy$(NC)"
-	@curl -s http://localhost:8000/health 2>/dev/null && echo "$(GREEN)Gateway: healthy$(NC)" || echo "$(RED)Gateway: unhealthy$(NC)"
-
-benchmark: ## Run performance benchmarks
-	@echo "$(BLUE)Running performance benchmarks...$(NC)"
-	$(POETRY) run pytest tests/performance/ -v --benchmark-only
-	@echo "$(GREEN)Benchmarks completed$(NC)"
-
-load-test: ## Run load tests
-	@echo "$(BLUE)Running load tests...$(NC)"
-	# Add load testing commands here (e.g., locust)
-	@echo "$(GREEN)Load tests completed$(NC)"
-
-init: ## Initialize project for first-time setup
-	@echo "$(BLUE)Initializing project...$(NC)"
-	@make install-dev
-	@make build
-	@echo "$(GREEN)Project initialized successfully$(NC)"
-	@echo "Run 'make dev' to start development environment"
+	@echo "$(BLUE)🏥 Checking service health...$(NC)"
+	@if kubectl get svc api-gateway -n munshi-local >/dev/null 2>&1; then \
+		echo "$(GREEN)Local deployment active$(NC)"; \
+	elif kubectl get svc api-gateway -n munshi-prod >/dev/null 2>&1; then \
+		echo "$(GREEN)Production deployment active$(NC)"; \
+	else \
+		echo "$(RED)No active deployments found$(NC)"; \
+	fi
 
 version: ## Show version information
-	@echo "$(BLUE)Version information:$(NC)"
+	@echo "$(BLUE)🔖 Version information:$(NC)"
 	@echo "Python: $$(python --version 2>&1)"
-	@echo "Poetry: $$(poetry --version 2>&1)"
+	@echo "Poetry: $$($(POETRY) --version 2>&1)"
 	@echo "Docker: $$(docker --version 2>&1)"
-	@echo "Docker Compose: $$(docker-compose --version 2>&1)"
-	@if command -v kubectl &> /dev/null; then echo "kubectl: $$(kubectl version --client --short 2>&1)"; fi
-	@if command -v linkerd &> /dev/null; then echo "Linkerd: $$(linkerd version --client --short 2>&1)"; fi
+	@echo "Kubernetes: $$(kubectl version --client --short 2>&1)"
+	@echo "Helm: $$(helm version --short 2>&1)"
+
+# =============================================================================
+# EXAMPLES
+# =============================================================================
+
+examples: ## Show usage examples
+	@echo "$(BLUE)📖 Usage Examples:$(NC)"
+	@echo
+	@echo "$(GREEN)🚀 Universal Deployment:$(NC)"
+	@echo "  make deploy                       # Auto-detect and deploy"
+	@echo "  make deploy-local                 # Force local (Docker Desktop)"
+	@echo "  make deploy-dev                   # Force development environment"
+	@echo "  make deploy-staging               # Force staging environment"
+	@echo "  make deploy-prod                  # Force production environment"
+	@echo
+	@echo "$(GREEN)🔧 Management:$(NC)"
+	@echo "  make status                       # Check deployment status"
+	@echo "  make logs                         # View application logs"
+	@echo "  make upgrade                      # Upgrade existing deployment"
+	@echo "  make rollback                     # Rollback deployment"
+	@echo "  make clean                        # Remove deployment"
+	@echo
+	@echo "$(GREEN)🐳 Image Management:$(NC)"
+	@echo "  make build                        # Build images (local only)"
+	@echo "  make push-cloud GITHUB_USERNAME=myuser TAG=v1.2.3"
+	@echo
+	@echo "$(GREEN)🧪 Testing & Quality:$(NC)"
+	@echo "  make test                         # Run all tests"
+	@echo "  make lint                         # Code quality checks"
+	@echo "  make format                       # Format code"

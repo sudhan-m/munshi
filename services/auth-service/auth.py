@@ -11,9 +11,9 @@ from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from .models import User, TokenData
-from .database import get_db
-from .cache import get_cache
+from models import User, TokenData
+from database import get_db
+from cache import get_cache
 import os
 import logging
 from dotenv import load_dotenv

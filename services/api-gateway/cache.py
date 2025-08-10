@@ -13,7 +13,7 @@ from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
 import redis
 from redis.connection import ConnectionPool
-from .config import get_gateway_settings
+from config import get_gateway_settings
 
 logger = logging.getLogger(__name__)
 

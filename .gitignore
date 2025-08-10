@@ -81,6 +81,14 @@ Thumbs.db
 secrets/
 certs/
 
+# Old configuration backups (cleanup)
+*.old
+
+# Environment files with real secrets
+.env.local
+.env.staging
+.env.production.local
+
 # Logs
 logs/
 *.log

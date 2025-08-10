@@ -4,7 +4,7 @@ import httpx
 import os
 import logging
 from typing import Dict, Any
-from .middleware import require_auth, get_user_from_token, auth_middleware
+from middleware import require_auth, get_user_from_token, auth_middleware
 from dotenv import load_dotenv
 
 load_dotenv()

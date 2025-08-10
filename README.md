@@ -202,78 +202,100 @@ munshi/
 
 ### Prerequisites
 
-- Python 3.11+
-- Docker and Docker Compose
-- Poetry (recommended) or pip
-- kubectl (for Kubernetes deployment)
-- Linkerd CLI (for service mesh)
+- **Docker Desktop** with Kubernetes enabled
+- **Helm 3.x** for Kubernetes deployments
+- **Python 3.11+**
+- **Poetry** for dependency management
+- **kubectl** (included with Docker Desktop)
+- **Git** for version control
 
 ### 1. Initialize Project
 
 ```bash
-# Clone and setup
+# Clone repository
 git clone <repository-url>
 cd munshi
 
 # Initialize development environment
 make init
 
-# Or manually:
-poetry install --with dev,test
-make build
+# This will:
+# - Install Python dependencies with Poetry
+# - Setup pre-commit hooks
+# - Prepare development environment
 ```
 
-### 2. Start Development Environment
+### 2. Install Helm (if not already installed)
 
 ```bash
-# Start with Docker Compose
-make dev
+# Install Helm
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# Or with Linkerd integration
-make dev-linkerd
-
-# Or manually
-./infrastructure/scripts/deploy.sh docker development
+# Verify installation
+helm version
 ```
 
-### 3. Access Services
+### 3. Start Development Environment
 
-- **Auth Service**: http://localhost:8001/docs
+```bash
+# Complete local development setup (recommended)
+make dev-setup
+
+# This will:
+# 1. Start local Docker registry (localhost:5001)
+# 2. Build and push images to local registry
+# 3. Deploy to Docker Desktop Kubernetes using Helm
+# 4. Setup development namespace (munshi-dev)
+```
+
+### 4. Access Services
+
+```bash
+# Port forward to access services
+kubectl port-forward svc/api-gateway 8000:8000 -n munshi-dev
+kubectl port-forward svc/auth-service 8001:8001 -n munshi-dev
+```
+
 - **API Gateway**: http://localhost:8000/docs
-- **Adminer** (DB): http://localhost:8080
-- **Redis Commander**: http://localhost:8081
-- **Prometheus**: http://localhost:9090 (with Linkerd)
-- **Grafana**: http://localhost:3000 (with Linkerd)
-- **Jaeger**: http://localhost:16686 (with Linkerd)
+- **Auth Service**: http://localhost:8001/docs
+- **Local Registry**: http://localhost:5001/v2/_catalog
+- **Helm Release Status**: `helm status munshi-dev`
 
-## 🔧 Development
+## 🔧 Development Workflow
 
-### Common Tasks
+### Local Development (Docker Desktop + Kubernetes + Helm)
 
 ```bash
-# Development
-make dev                    # Start development environment
-make test                   # Run all tests
-make lint                   # Run code quality checks
-make format                 # Format code
+# Setup and Development
+make init                   # Initialize project
+make dev-setup              # Complete local setup with Helm
+make dev-status             # Check development environment
+make dev-logs               # Follow application logs
+make dev-rebuild            # Rebuild and redeploy with Helm
+make dev-clean              # Clean local environment and Helm release
+
+# Local Registry Management
+make registry-start         # Start local Docker registry
+make registry-stop          # Stop local Docker registry
+make registry-status        # Check registry status
+
+# Helm Management
+helm status munshi-dev      # Check Helm release status
+helm list                   # List all Helm releases
+helm get values munshi-dev  # View current configuration
 
 # Testing
+make test                   # Run all tests
 make test-unit              # Unit tests only
 make test-integration       # Integration tests
 make test-e2e              # End-to-end tests
 make test-performance      # Performance tests
 make test-security         # Security tests
 
-# Deployment
-make deploy-dev            # Deploy to development
-make deploy-staging        # Deploy to staging
-make deploy-prod           # Deploy to production (with confirmation)
-
-# Monitoring
-make status                # Show service status
-make logs                  # Show service logs
-make health                # Check service health
-make metrics               # Open metrics dashboards
+# Code Quality
+make lint                   # Run linting checks
+make format                 # Format code
+make security-scan          # Run security scans
 ```
 
 ### Working with Shared Components
@@ -307,37 +329,68 @@ pytest tests/ --cov=services --cov-report=html
 
 ## 🚢 Deployment Options
 
-### 1. Docker Compose (Recommended for Development)
+### Local Development (Docker Desktop + Helm)
 
 ```bash
-# Development
-./infrastructure/scripts/deploy.sh docker development
+# Complete local setup with Helm
+make dev-setup
 
-# Production
-./infrastructure/scripts/deploy.sh docker production
+# Rebuild after code changes
+make dev-rebuild
+
+# Monitor development environment
+make dev-status
+make dev-logs
+
+# Manual Helm commands
+helm upgrade munshi-dev infrastructure/helm/munshi -f infrastructure/helm/munshi/values-local.yaml
 ```
 
-### 2. Kubernetes (Recommended for Production)
+### Cloud Production Deployment with Helm
 
 ```bash
-# Development
-./infrastructure/scripts/deploy.sh k8s development
+# Build and push to GitHub Container Registry
+make push-cloud GITHUB_USERNAME=your-username TAG=v1.0.0
 
-# Production with Linkerd
-./infrastructure/scripts/deploy.sh k8s production --linkerd
+# Deploy to production cluster using Helm
+make deploy-cloud-prod GITHUB_USERNAME=your-username CLUSTER_CONTEXT=prod-cluster TAG=v1.0.0
+
+# Deploy to staging cluster using Helm
+make deploy-cloud-staging GITHUB_USERNAME=your-username CLUSTER_CONTEXT=staging-cluster TAG=v1.0.0
+
+# Manual Helm deployment
+helm upgrade --install munshi-prod infrastructure/helm/munshi \
+  -f infrastructure/helm/munshi/values-prod.yaml \
+  --set global.imageRegistry=ghcr.io/your-username \
+  --set images.apiGateway.tag=v1.0.0 \
+  --set images.authService.tag=v1.0.0 \
+  --create-namespace
 ```
 
-### 3. Service Mesh with Linkerd
+### Helm Chart Structure
 
-```bash
-# Install Linkerd
-curl -sL https://run.linkerd.io/install | sh
-linkerd install --crds | kubectl apply -f -
-linkerd install | kubectl apply -f -
-
-# Deploy with mesh
-./infrastructure/scripts/deploy.sh k8s production --linkerd
 ```
+infrastructure/helm/munshi/
+├── Chart.yaml              # Helm chart metadata
+├── values.yaml             # Default production values
+├── values-local.yaml       # Local development values
+├── values-prod.yaml        # Production values
+└── templates/
+    ├── _helpers.tpl        # Template helpers
+    ├── namespace.yaml      # Namespace definition
+    ├── secrets.yaml        # Secrets management
+    ├── api-gateway.yaml    # API Gateway deployment
+    ├── auth-service.yaml   # Auth Service deployment
+    └── databases.yaml      # PostgreSQL and Redis
+```
+
+### GitHub Actions CI/CD
+
+The project includes automated CI/CD with GitHub Actions:
+- **Builds** images on push to main/develop
+- **Pushes** to GitHub Container Registry
+- **Creates** signed attestations for security
+- **Ready for Helm-based deployments**
 
 ## 🔒 Security Features
 
@@ -376,20 +429,40 @@ linkerd install | kubectl apply -f -
 
 ## 🔄 CI/CD Integration
 
-The project is designed for enterprise CI/CD pipelines:
+The project uses Helm for consistent deployments across environments:
 
 ```bash
-# Code quality pipeline
-make lint
-make test
-make security-scan
+# Local development workflow
+make lint                   # Code quality checks
+make test                   # Run all tests
+make security-scan          # Security scanning
+make dev-rebuild            # Local testing with Helm
 
-# Build and deploy pipeline
-make build
-make deploy-staging
-make test-e2e
-make deploy-prod
+# Production deployment with Helm
+make deploy-cloud-prod GITHUB_USERNAME=username CLUSTER_CONTEXT=prod-cluster
 ```
+
+### Environment Configuration
+
+- **Local Development**: `values-local.yaml` with reduced resources and debug settings
+- **Production**: `values-prod.yaml` with production-grade resources and security
+- **Staging**: Uses production values with staging-specific overrides
+
+### GitHub Container Registry Setup
+
+1. **Enable** GitHub Container Registry in your repository
+2. **Update** `values-prod.yaml` with your GitHub username
+3. **Configure** your cloud cluster credentials
+4. **Deploy** using Helm commands or Makefile shortcuts
+
+### Helm Best Practices Implemented
+
+- **Values-based configuration** for different environments
+- **Template helpers** for consistent labeling
+- **Resource management** with proper limits and requests
+- **Security contexts** and non-root containers
+- **Health checks** for all services
+- **Service mesh ready** with Linkerd annotations
 
 ## 📈 Monitoring & Observability
 
@@ -415,28 +488,58 @@ make deploy-prod
 
 ## 🛠️ Configuration
 
-Services use environment-based configuration with validation:
+### Helm Values Configuration
+
+Configuration is managed through Helm values files:
+
+```yaml
+# values-local.yaml (Development)
+global:
+  imageRegistry: host.docker.internal:5001
+environment: development
+replicaCount:
+  apiGateway: 1
+  authService: 1
+resources:
+  apiGateway:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+```
+
+```yaml
+# values-prod.yaml (Production)
+global:
+  imageRegistry: ghcr.io/your-username
+environment: production
+replicaCount:
+  apiGateway: 3
+  authService: 2
+serviceMesh:
+  enabled: true
+monitoring:
+  enabled: true
+```
+
+### Environment Variables
+
+Services use environment-based configuration:
 
 ```bash
-# Core settings
-SERVICE_NAME=auth-service
+# Core settings (configured via Helm values)
 ENVIRONMENT=production
 DEBUG=false
 
-# Database
-DATABASE_URL=postgresql://user:pass@host:port/db
+# Database URLs (auto-generated by Helm)
+GATEWAY_DATABASE_URL=postgresql://gateway_user:password@postgres-gateway:5432/gateway_db
+AUTH_DATABASE_URL=postgresql://auth_user:password@postgres-auth:5432/auth_db
 
-# Redis
-REDIS_URL=redis://host:port/db
+# Redis URLs (auto-generated by Helm)
+GATEWAY_REDIS_URL=redis://redis-gateway:6379/0
+AUTH_REDIS_URL=redis://redis-auth:6379/1
 
-# Security
-JWT_SECRET_KEY=your-secret-key
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Observability
-LOG_LEVEL=INFO
-ENABLE_METRICS=true
-ENABLE_TRACING=true
+# Security (managed via Kubernetes secrets)
+JWT_SECRET_KEY=<from-secret>
 ```
 
 ## 🤝 Contributing
@@ -458,22 +561,23 @@ make security-scan
 
 ## 📚 Additional Documentation
 
-- [**IMPROVED_STRUCTURE.md**](IMPROVED_STRUCTURE.md) - Detailed structure improvements
-- [**LINKERD.md**](LINKERD.md) - Service mesh integration guide
-- [**Auth Service README**](src/auth_service/README.md) - Authentication service details
-- [**API Gateway README**](src/api-gateway/README.md) - Gateway service details
+- [**Helm Chart**](infrastructure/helm/munshi/) - Kubernetes deployment with Helm
+- [**Auth Service README**](services/auth-service/README.md) - Authentication service details
+- [**API Gateway README**](services/api-gateway/README.md) - Gateway service details
+- [**Configuration Guide**](docs/CONFIGURATION.md) - Environment and Helm configuration
 
 ## 🏆 Enterprise Features
 
 - ✅ **Microservices Architecture** with proper service isolation
-- ✅ **Service Mesh Integration** with Linkerd for automatic mTLS
+- ✅ **Helm-based Deployments** for consistent, reproducible deployments
+- ✅ **Multi-Environment Support** (local, staging, production)
+- ✅ **Local Development** with Docker Desktop Kubernetes and local registry
+- ✅ **Cloud-Ready** with GitHub Container Registry integration
 - ✅ **Shared Component Libraries** for code reuse and consistency
 - ✅ **Comprehensive Testing Strategy** (unit, integration, E2E, performance, security)
-- ✅ **Infrastructure as Code** with Docker, Kubernetes, and Terraform
-- ✅ **CI/CD Ready** with automated testing and deployment
+- ✅ **Service Mesh Ready** with Linkerd annotations and configuration
 - ✅ **Enterprise Security** with authentication, authorization, and encryption
-- ✅ **Production Monitoring** with metrics, logging, and tracing
-- ✅ **High Availability** with auto-scaling and fault tolerance
+- ✅ **Production Monitoring** ready with observability configuration
 - ✅ **Development Experience** with automated tooling and documentation
 
 ---

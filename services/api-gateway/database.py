@@ -16,9 +16,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GATEWAY_DATABASE_URL = os.getenv("GATEWAY_DATABASE_URL", "postgresql://gateway_user:gateway_password@localhost:5432/gateway_db")
+from config import get_gateway_settings
 
-engine = create_engine(GATEWAY_DATABASE_URL)
+settings = get_gateway_settings()
+
+engine = create_engine(settings.gateway_database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

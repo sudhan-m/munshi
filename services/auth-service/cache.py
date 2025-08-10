@@ -12,7 +12,7 @@ from typing import Optional, Any, Dict, List
 from datetime import timedelta
 import redis
 from redis.connection import ConnectionPool
-from .config import get_auth_settings
+from config import get_auth_settings
 
 logger = logging.getLogger(__name__)
 

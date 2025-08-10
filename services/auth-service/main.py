@@ -14,9 +14,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy.orm import Session
 from datetime import timedelta
-from .models import UserCreate, UserLogin, UserResponse, Token, User
-from .database import get_db, create_tables
-from .auth import (
+from models import UserCreate, UserLogin, UserResponse, Token, User
+from database import get_db, create_tables
+from auth import (
     authenticate_user, 
     create_user, 
     create_access_token, 
@@ -27,48 +27,58 @@ from .auth import (
     logout_user,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
-from .cache import get_cache, close_cache
+from cache import get_cache, close_cache
+from config import get_auth_settings
 import os
 import re
 import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+settings = get_auth_settings()
 
 app = FastAPI(
     title="Authentication Service",
     description="Secure authentication microservice with server-side bcrypt password hashing and mTLS support",
-    version="1.0.0"
+    version=settings.service_version,
+    debug=settings.debug
 )
 security = HTTPBearer()
 
-# Add trusted host middleware for mTLS
-app.add_middleware(
-    TrustedHostMiddleware, 
-    allowed_hosts=["*"]  # In production, specify actual hosts
-)
+# Note: TrustedHostMiddleware is optional when using Linkerd ServerAuthorization
+# Linkerd handles service-to-service authorization at the mesh level
+# Only add for additional host-based restrictions if needed
+if settings.trusted_hosts_enabled:
+    app.add_middleware(
+        TrustedHostMiddleware, 
+        allowed_hosts=settings.trusted_hosts
+    )
 
 @app.middleware("http")
-async def verify_linkerd_client(request: Request, call_next):
-    """Verify client identity via Linkerd service mesh"""
-    # Linkerd provides automatic mTLS and service identity
-    linkerd_service = request.headers.get("X-Linkerd-Service-Name")
-    gateway_id = request.headers.get("X-Gateway-ID")
+async def linkerd_identity_middleware(request: Request, call_next):
+    """Extract Linkerd service identity for observability and logging"""
+    # Linkerd automatically handles authorization via ServerAuthorization policies
+    # This middleware just extracts identity information for logging/observability
     
-    # Trust requests that come through Linkerd with proper headers
-    if linkerd_service == "api-gateway" and gateway_id == "api-gateway":
-        request.state.verified_client = True
-        request.state.service_mesh = "linkerd"
-        request.state.source_service = linkerd_service
-    else:
-        request.state.verified_client = False
-        request.state.service_mesh = None
-        request.state.source_service = "unknown"
+    # Extract Linkerd identity headers (set by Linkerd proxy)
+    client_identity = request.headers.get("l5d-client-id", "unknown")
+    dst_service = request.headers.get("l5d-dst-service", "unknown")
     
-    # Add Linkerd observability headers to response
+    # Set request state for logging and observability
+    request.state.client_identity = client_identity
+    request.state.destination_service = dst_service
+    request.state.service_mesh = "linkerd"
+    
+    # Log service-to-service communication for audit
+    if client_identity != "unknown":
+        logging.info(f"Service-to-service call: {client_identity} -> auth-service")
+    
     response = await call_next(request)
-    response.headers["X-Linkerd-Auth-Service"] = "true"
-    response.headers["X-Service-Mesh-Verified"] = str(request.state.verified_client)
+    
+    # Add observability headers
+    response.headers["X-Service-Identity"] = client_identity
+    response.headers["X-Destination-Service"] = dst_service
+    response.headers["X-Auth-Service-Version"] = settings.service_version
     
     return response
 
@@ -116,34 +126,34 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     Raises:
         HTTPException: 400 if validation fails or user already exists
     """
-    if len(user.password) < 8:
+    if len(user.password) < settings.password_min_length:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters long"
+            detail=f"Password must be at least {settings.password_min_length} characters long"
         )
     
-    if not re.search(r"[A-Z]", user.password):
+    if settings.require_password_uppercase and not re.search(r"[A-Z]", user.password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must contain at least one uppercase letter"
         )
     
-    if not re.search(r"[a-z]", user.password):
+    if settings.require_password_lowercase and not re.search(r"[a-z]", user.password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must contain at least one lowercase letter"
         )
     
-    if not re.search(r"\d", user.password):
+    if settings.require_password_numbers and not re.search(r"\d", user.password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must contain at least one number"
         )
     
-    if len(user.username) < 3:
+    if len(user.username) < settings.min_username_length:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username must be at least 3 characters long"
+            detail=f"Username must be at least {settings.min_username_length} characters long"
         )
     
     existing_user = get_user_by_email(db, user.email)
@@ -191,7 +201,7 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
@@ -288,7 +298,7 @@ async def health_check():
     Returns:
         dict: Service health status
     """
-    return {"status": "healthy", "service": "auth-service"}
+    return {"status": "healthy", "service": settings.service_name, "version": settings.service_version}
 
 
 if __name__ == "__main__":
@@ -299,5 +309,4 @@ if __name__ == "__main__":
     like uvicorn with appropriate configuration.
     """
     import uvicorn
-    port = int(os.getenv("AUTH_SERVICE_PORT", "8001"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=settings.auth_service_host, port=settings.auth_service_port)

@@ -563,15 +563,15 @@ from sqlalchemy import Column, Integer, String, DateTime
 
 ### 🔧 Configuration Management
 
-#### Pydantic Settings
+#### JSON Configuration System
 ```python
-from pydantic_settings import BaseSettings
+from shared.config.config_loader import get_config
 ```
-**What it does**: Type-safe configuration management
+**What it does**: Unified JSON + environment variable configuration
 **Why we use it**:
-- ✅ Environment variable parsing
-- ✅ Validation of configuration values
-- ✅ Default value handling
+- ✅ Separation of business logic (JSON) from infrastructure (env vars)
+- ✅ Environment-specific deployment flexibility
+- ✅ Secure secret management
 - ✅ Documentation of settings
 
 ## Database Design

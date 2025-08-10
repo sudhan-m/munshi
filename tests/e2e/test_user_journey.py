@@ -7,6 +7,7 @@ from browser/client perspective.
 
 import pytest
 import asyncio
+import os
 from typing import Dict, Any
 
 
@@ -20,8 +21,8 @@ class TestUserJourney:
         """Setup test environment."""
         self.settings = test_settings
         self.base_url = f"http://{test_settings.host}:{test_settings.port}"
-        self.auth_service_url = "http://localhost:8001"  # Auth service
-        self.gateway_url = "http://localhost:8000"  # API Gateway
+        self.auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8001")  # Auth service
+        self.gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8000")  # API Gateway
     
     async def test_new_user_registration_and_first_login(self, test_client):
         """Test complete new user onboarding journey."""

@@ -38,7 +38,8 @@ src/auth_service/
 ├── database.py                  # Database configuration and session management
 ├── auth.py                      # Authentication utilities and password hashing
 ├── cache.py                     # Redis cache utilities and session management
-├── config.py                    # Service configuration and settings
+├── config.py                    # Configuration loader wrapper
+├── config.json                  # Application behavior and business logic settings
 ├── requirements.txt             # Python dependencies for auth service
 ├── .env.example                 # Environment variables template
 ├── Dockerfile                   # Docker image configuration
@@ -67,7 +68,8 @@ src/api-gateway/
 ├── middleware.py                # Authentication, rate limiting, and caching middleware
 ├── cache.py                     # Redis cache utilities for performance and rate limiting
 ├── database.py                  # Database models and connection management
-├── config.py                    # Gateway configuration and settings
+├── config.py                    # Configuration loader wrapper
+├── config.json                  # Application behavior and business logic settings
 ├── requirements.txt             # Python dependencies for gateway
 ├── .env.example                 # Environment variables template
 ├── Dockerfile                   # Docker image configuration

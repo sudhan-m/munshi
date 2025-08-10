@@ -1,0 +1,136 @@
+# Development/Staging environment values
+# For staging/testing deployments
+
+# Global settings
+global:
+  imageRegistry: ghcr.io/your-username
+  imagePullPolicy: Always
+
+# Environment
+environment: development
+namespace: munshi-dev
+
+# Images - use dev/latest tags
+images:
+  apiGateway:
+    repository: munshi/api-gateway
+    tag: dev
+  authService:
+    repository: munshi/auth-service
+    tag: dev
+
+# Replica counts (moderate for development)
+replicaCount:
+  apiGateway: 2
+  authService: 1
+  postgres: 1
+  redis: 1
+
+# Resource requirements for development
+resources:
+  apiGateway:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  authService:
+    requests:
+      memory: "64Mi"
+      cpu: "25m"
+    limits:
+      memory: "128Mi"
+      cpu: "100m"
+  postgres:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "150m"
+  redis:
+    requests:
+      memory: "32Mi"
+      cpu: "25m"
+    limits:
+      memory: "64Mi"
+      cpu: "50m"
+
+# Development environment variables
+env:
+  apiGateway:
+    ENVIRONMENT: "development"
+    DEBUG: "true"
+    GATEWAY_HOST: "0.0.0.0"
+    GATEWAY_PORT: "8000"
+    RATE_LIMIT_ENABLED: "true"
+    DEFAULT_RATE_LIMIT_REQUESTS: "500"
+    AUTHENTICATED_RATE_LIMIT_REQUESTS: "2000"
+    JWT_VERIFICATION_ENABLED: "true"
+    CIRCUIT_BREAKER_ENABLED: "true"
+  authService:
+    ENVIRONMENT: "development"
+    DEBUG: "true"
+    AUTH_SERVICE_HOST: "0.0.0.0"
+    AUTH_SERVICE_PORT: "8001"
+
+# Linkerd service mesh configuration for development
+linkerd:
+  enabled: true
+  controlPlane:
+    identity:
+      issuer:
+        crtExpiry: 2160h
+    proxy:
+      resources:
+        cpu:
+          request: "15m"
+          limit: "150m"
+        memory:
+          request: "25Mi"
+          limit: "75Mi"
+  viz:
+    enabled: true
+    dashboard:
+      enabled: true
+      externalUrl: "https://linkerd-dev.example.com"
+    prometheus:
+      enabled: true
+    grafana:
+      enabled: true
+  inject:
+    default: enabled
+
+# Ingress configuration for development
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+  hosts:
+    - host: munshi-dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: api-gateway
+  tls:
+    - secretName: munshi-dev-tls
+      hosts:
+        - munshi-dev.example.com
+
+# Enable monitoring for development
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+
+# Development secrets
+secrets:
+  jwtSecret: "dev_jwt_secret_key_change_for_staging"
+  postgres:
+    authPassword: "dev_auth_password_change_me"
+    gatewayPassword: "dev_gateway_password_change_me"

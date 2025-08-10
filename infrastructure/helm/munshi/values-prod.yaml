@@ -1,0 +1,112 @@
+# Production values
+# Production-optimized configuration
+
+# Global settings for production
+global:
+  imageRegistry: ghcr.io/your-username
+  imagePullPolicy: IfNotPresent
+
+# Environment
+environment: production
+namespace: munshi-prod
+
+# Production replica counts
+replicaCount:
+  apiGateway: 3
+  authService: 2
+  postgres: 1
+  redis: 1
+
+# Production resource requirements
+resources:
+  apiGateway:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  authService:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "300m"
+  postgres:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  redis:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+# Production environment variables
+env:
+  apiGateway:
+    ENVIRONMENT: "production"
+    DEBUG: "false"
+    GATEWAY_HOST: "0.0.0.0"
+    GATEWAY_PORT: "8000"
+    RATE_LIMIT_ENABLED: "true"
+    DEFAULT_RATE_LIMIT_REQUESTS: "1000"
+    AUTHENTICATED_RATE_LIMIT_REQUESTS: "5000"
+    JWT_VERIFICATION_ENABLED: "true"
+    CIRCUIT_BREAKER_ENABLED: "true"
+  authService:
+    ENVIRONMENT: "production"
+    DEBUG: "false"
+    AUTH_SERVICE_HOST: "0.0.0.0"
+    AUTH_SERVICE_PORT: "8001"
+
+# Enable service mesh for production
+serviceMesh:
+  enabled: true
+  linkerd:
+    inject: enabled
+    proxy:
+      cpuRequest: "50m"
+      memoryRequest: "64Mi"
+      cpuLimit: "500m"
+      memoryLimit: "256Mi"
+
+# Enable monitoring for production
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+
+# Ingress for production
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: api.yourdomain.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: api-gateway
+  tls:
+    - secretName: munshi-tls
+      hosts:
+        - api.yourdomain.com
+
+# Production secrets should be managed externally
+# These are placeholders - use external secret management in production
+secrets:
+  jwtSecret: "CHANGE_THIS_IN_PRODUCTION"
+  postgres:
+    authPassword: "CHANGE_THIS_IN_PRODUCTION"
+    gatewayPassword: "CHANGE_THIS_IN_PRODUCTION"

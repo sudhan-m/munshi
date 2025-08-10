@@ -1,17 +1,13 @@
 """
 Shared configuration utilities for microservices.
 
-This module provides common configuration patterns, environment
-variable handling, and settings management.
+This module provides unified configuration loading that combines
+JSON configuration files with environment variables.
 """
 
-from .base_settings import BaseServiceSettings, DatabaseSettings, RedisSettings
-from .env_loader import load_environment, get_env_var
+from .config_loader import ConfigLoader, get_config
 
 __all__ = [
-    "BaseServiceSettings", 
-    "DatabaseSettings", 
-    "RedisSettings",
-    "load_environment",
-    "get_env_var"
+    "ConfigLoader",
+    "get_config"
 ]

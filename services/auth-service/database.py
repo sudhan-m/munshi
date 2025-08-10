@@ -15,9 +15,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AUTH_DATABASE_URL = os.getenv("AUTH_DATABASE_URL", "postgresql://auth_user:auth_password@localhost:5432/auth_db")
+from config import get_auth_settings
 
-engine = create_engine(AUTH_DATABASE_URL)
+settings = get_auth_settings()
+
+engine = create_engine(settings.auth_database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -55,5 +57,5 @@ def create_tables():
     Note:
         Only creates tables that don't already exist. Safe to call multiple times.
     """
-    from .models import Base
+    from models import Base
     Base.metadata.create_all(bind=engine)

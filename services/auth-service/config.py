@@ -1,108 +1,181 @@
 """
 Configuration settings for the authentication service.
 
-This module defines all configuration parameters for the auth service using
-Pydantic settings. Supports environment variable overrides and provides
-sensible defaults for development.
+This module provides configuration loading for the auth service using
+JSON configuration files for application settings and environment variables
+for infrastructure and secrets.
 """
 
-from pydantic_settings import BaseSettings
-from typing import Optional
+import os
+import sys
+from typing import Dict, Any, Optional
+from pathlib import Path
+
+# Add the services directory to the Python path
+services_dir = Path(__file__).parent.parent
+if str(services_dir) not in sys.path:
+    sys.path.insert(0, str(services_dir))
+
+from shared.config.config_loader import get_config
 
 
-class AuthServiceSettings(BaseSettings):
+class AuthServiceSettings:
     """
     Configuration settings for the authentication microservice.
     
-    All settings can be overridden via environment variables. The service
-    uses its own dedicated database and Redis instance for security isolation.
-    
-    Attributes:
-        service_name: Service identifier for logging and monitoring
-        service_version: Current version of the auth service
-        auth_database_url: PostgreSQL connection string for auth database
-        auth_redis_url: Redis connection string for auth service cache
-        jwt_secret_key: Secret key for JWT token signing (MUST be changed in production)
-        jwt_algorithm: Algorithm for JWT token signing/verification
-        access_token_expire_minutes: Token expiration time in minutes
-        refresh_token_expire_days: Refresh token expiration in days
-        auth_service_host: Host address to bind the service
-        auth_service_port: Port number for the auth service
-        environment: Deployment environment (development/staging/production)
-        debug: Enable debug mode (should be False in production)
-        allowed_origins: CORS allowed origins list
-        allowed_methods: CORS allowed HTTP methods
-        allowed_headers: CORS allowed headers
-        rate_limit_requests: Maximum requests per time window
-        rate_limit_window: Rate limiting time window in seconds
-        password_hash_rounds: bcrypt rounds for password hashing
-        salt_rounds: PBKDF2 iterations for client-side hashing
-        log_level: Logging level (DEBUG/INFO/WARNING/ERROR)
-        log_format: Log message format string
-        password_min_length: Minimum password length requirement
-        max_login_attempts: Maximum failed login attempts before lockout
-        account_lockout_minutes: Account lockout duration after failed attempts
+    Loads configuration from:
+    - config.json: Application behavior, business logic, static settings
+    - Environment variables: Secrets, infrastructure, deployment settings
     """
     
+    def __init__(self, config_dir: Optional[str] = None):
+        """Initialize auth service settings."""
+        service_dir = config_dir or os.path.dirname(os.path.abspath(__file__))
+        self.config = get_config("auth-service", service_dir)
+        
+        # Cache commonly used values
+        self._service_config = self.config.get_service_config()
+        self._jwt_config = self.config.get_jwt_config()
+        self._logging_config = self.config.get_logging_config()
+        self._cors_config = self.config.get_cors_config()
+        self._rate_limit_config = self.config.get_rate_limit_config()
+        self._host, self._port = self.config.get_host_port()
+    
     # Service info
-    service_name: str = "auth-service"
-    service_version: str = "1.0.0"
+    @property
+    def service_name(self) -> str:
+        return self._service_config["name"]
     
-    # Database settings (dedicated auth database)
-    auth_database_url: str = "postgresql://auth_user:auth_password@localhost:5432/auth_db"
+    @property
+    def service_version(self) -> str:
+        return self._service_config["version"]
     
-    # Redis settings (for auth service caching/sessions)
-    auth_redis_url: str = "redis://localhost:6379/1"
+    @property
+    def environment(self) -> str:
+        return self.config.get_environment()
     
-    # JWT settings
-    jwt_secret_key: str = "auth_service_secret_key_change_this"
-    jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
+    @property
+    def debug(self) -> bool:
+        return self.config.is_debug()
     
-    # Service settings
-    auth_service_host: str = "0.0.0.0"
-    auth_service_port: int = 8001
+    # Infrastructure settings (from environment)
+    @property
+    def auth_database_url(self) -> str:
+        return self.config.get_database_url("auth")
     
-    # Environment
-    environment: str = "development"
-    debug: bool = False
+    @property
+    def auth_redis_url(self) -> str:
+        return self.config.get_redis_url("auth")
+    
+    @property
+    def auth_service_host(self) -> str:
+        return self._host
+    
+    @property
+    def auth_service_port(self) -> int:
+        return self._port
+    
+    # JWT settings (secret from env, config from JSON)
+    @property
+    def jwt_secret_key(self) -> str:
+        return self._jwt_config["secret_key"]
+    
+    @property
+    def jwt_algorithm(self) -> str:
+        return self._jwt_config["algorithm"]
+    
+    @property
+    def access_token_expire_minutes(self) -> int:
+        return self._jwt_config["access_token_expire_minutes"]
+    
+    @property
+    def refresh_token_expire_days(self) -> int:
+        return self._jwt_config["refresh_token_expire_days"]
+    
+    # Security settings (from JSON config)
+    @property
+    def password_min_length(self) -> int:
+        return self.config.get("security.password.min_length", 8, "PASSWORD_MIN_LENGTH")
+    
+    @property
+    def password_hash_rounds(self) -> int:
+        return self.config.get("security.password.hash_rounds", 12, "PASSWORD_HASH_ROUNDS")
+    
+    @property
+    def max_login_attempts(self) -> int:
+        return self.config.get("security.account_lockout.max_login_attempts", 5, "MAX_FAILED_LOGIN_ATTEMPTS")
+    
+    @property
+    def account_lockout_minutes(self) -> int:
+        return self.config.get("security.account_lockout.lockout_duration_minutes", 15, "ACCOUNT_LOCKOUT_DURATION_MINUTES")
+    
+    @property
+    def trusted_hosts_enabled(self) -> bool:
+        return self.config.get("security.trusted_hosts.enabled", False, "TRUSTED_HOSTS_ENABLED")
+    
+    @property
+    def trusted_hosts(self) -> list:
+        return self.config.get("security.trusted_hosts.hosts", ["localhost", "auth-service"], "TRUSTED_HOSTS")
     
     # CORS settings
-    allowed_origins: list = ["http://localhost:3000", "http://localhost:8000"]
-    allowed_methods: list = ["GET", "POST", "PUT", "DELETE"]
-    allowed_headers: list = ["*"]
+    @property
+    def allowed_origins(self) -> list:
+        return self._cors_config["origins"]
+    
+    @property
+    def allowed_methods(self) -> list:
+        return self._cors_config["methods"]
+    
+    @property
+    def allowed_headers(self) -> list:
+        return self._cors_config["headers"]
     
     # Rate limiting
-    rate_limit_requests: int = 100
-    rate_limit_window: int = 60
+    @property
+    def rate_limit_requests(self) -> int:
+        return self._rate_limit_config["requests_per_minute"]
     
-    # Password hashing
-    password_hash_rounds: int = 12
-    salt_rounds: int = 100000
+    @property
+    def rate_limit_window(self) -> int:
+        return self._rate_limit_config["window_seconds"]
     
     # Logging
-    log_level: str = "INFO"
-    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    @property
+    def log_level(self) -> str:
+        return self._logging_config["level"]
     
-    # Security
-    password_min_length: int = 8
-    max_login_attempts: int = 5
-    account_lockout_minutes: int = 15
+    @property
+    def log_format(self) -> str:
+        return self._logging_config["format"]
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    # Additional settings from JSON config
+    @property
+    def min_username_length(self) -> int:
+        return self.config.get("validation.min_username_length", 3, "MIN_USERNAME_LENGTH")
+    
+    @property
+    def require_password_uppercase(self) -> bool:
+        return self.config.get("security.password.require_uppercase", True)
+    
+    @property
+    def require_password_lowercase(self) -> bool:
+        return self.config.get("security.password.require_lowercase", True)
+    
+    @property
+    def require_password_numbers(self) -> bool:
+        return self.config.get("security.password.require_numbers", True)
+    
+    @property
+    def enable_refresh_tokens(self) -> bool:
+        return self.config.get("features.enable_refresh_tokens", True)
 
 
 def get_auth_settings() -> AuthServiceSettings:
     """
     Get the current authentication service settings.
     
-    Creates and returns a settings instance with values from environment
-    variables or defaults. This function should be used to access settings
-    throughout the application.
+    Creates and returns a settings instance that loads configuration from
+    both JSON files and environment variables.
     
     Returns:
         AuthServiceSettings: Configured settings instance

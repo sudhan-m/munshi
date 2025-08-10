@@ -5,14 +5,14 @@ import time
 import uuid
 import os
 import logging
-from .router import create_gateway_router
-from .cache import get_gateway_cache, close_gateway_cache
-from .middleware import (
+from router import create_gateway_router
+from cache import get_gateway_cache, close_gateway_cache
+from middleware import (
     create_rate_limit_middleware,
     create_response_cache_middleware,
     create_logging_middleware
 )
-from .config import get_gateway_settings
+from config import get_gateway_settings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,8 +21,9 @@ settings = get_gateway_settings()
 
 app = FastAPI(
     title="API Gateway",
-    description="Secure API Gateway with Redis caching, rate limiting, and authentication",
-    version="1.0.0"
+    description="Secure API Gateway with Redis caching, rate limiting, and Linkerd mTLS",
+    version=settings.service_version,
+    debug=settings.debug
 )
 
 # Add CORS middleware
@@ -41,9 +42,17 @@ app.middleware("http")(create_response_cache_middleware())
 
 @app.middleware("http")
 async def add_request_id_and_timing(request: Request, call_next):
-    """Add request ID and timing middleware"""
+    """Add request ID, timing, and Linkerd identity middleware"""
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
+    
+    # Extract Linkerd service identity for observability
+    client_identity = request.headers.get("l5d-client-id", "external")
+    request.state.client_identity = client_identity
+    
+    # Log external vs service-to-service traffic
+    if client_identity != "external":
+        logging.info(f"Service-to-service call: {client_identity} -> api-gateway")
     
     start_time = time.time()
     response = await call_next(request)
@@ -51,6 +60,8 @@ async def add_request_id_and_timing(request: Request, call_next):
     
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = str(process_time)
+    response.headers["X-Client-Identity"] = client_identity
+    response.headers["X-Gateway-Version"] = settings.service_version
     
     return response
 
@@ -70,7 +81,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 async def root():
     return {
         "message": "API Gateway is running",
-        "version": "1.0.0",
+        "version": settings.service_version,
         "endpoints": {
             "health": "/health",
             "auth": "/auth/*",
@@ -84,7 +95,8 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "service": "api-gateway"
+        "service": settings.service_name,
+        "version": settings.service_version
     }
 
 # Startup and shutdown events

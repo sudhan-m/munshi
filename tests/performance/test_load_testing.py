@@ -8,6 +8,7 @@ and identifies bottlenecks and scalability limits.
 import pytest
 import asyncio
 import time
+import os
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,8 +22,8 @@ class TestLoadTesting:
     def setup(self, test_settings):
         """Setup performance test environment."""
         self.settings = test_settings
-        self.auth_service_url = "http://localhost:8001"
-        self.gateway_url = "http://localhost:8000"
+        self.auth_service_url = os.getenv("AUTH_SERVICE_URL", "http://localhost:8001")
+        self.gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8000")
         self.concurrent_users = 50
         self.test_duration = 30  # seconds
     

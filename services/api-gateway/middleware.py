@@ -16,12 +16,13 @@ from fastapi.responses import JSONResponse
 import httpx
 import os
 from dotenv import load_dotenv
-from .cache import get_gateway_cache
-from .config import get_gateway_settings
+from cache import get_gateway_cache
+from config import get_gateway_settings
 
 load_dotenv()
 
-AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8001")
+settings = get_gateway_settings()
+AUTH_SERVICE_URL = settings.auth_service_url
 logger = logging.getLogger(__name__)
 
 security = HTTPBearer()

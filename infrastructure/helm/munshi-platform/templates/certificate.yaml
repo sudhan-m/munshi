@@ -1,0 +1,30 @@
+{{- if and .Values.ingress.enabled .Values.certManager.enabled }}
+{{- range .Values.ingress.hosts }}
+{{- if $.Values.ingress.tls }}
+{{- range $.Values.ingress.tls }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .secretName }}
+  labels:
+    {{- include "munshi-platform.labels" $ | nindent 4 }}
+spec:
+  secretName: {{ .secretName }}
+  dnsNames:
+    {{- range .hosts }}
+    - {{ . | quote }}
+    {{- end }}
+  issuerRef:
+    {{- if eq $.Values.environment "development" }}
+    name: selfsigned-issuer
+    {{- else if eq $.Values.environment "staging" }}
+    name: letsencrypt-staging
+    {{- else }}
+    name: letsencrypt-prod
+    {{- end }}
+    kind: ClusterIssuer
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

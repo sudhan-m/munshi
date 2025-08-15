@@ -1,0 +1,150 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "munshi-platform.fullname" . -}}
+{{- $svcPort := .Values.services.uiService.port -}}
+{{- if and .Values.ingress.className (not (hasKey .Values.ingress.annotations "kubernetes.io/ingress.class")) }}
+  {{- $_ := set .Values.ingress.annotations "kubernetes.io/ingress.class" .Values.ingress.className}}
+{{- end }}
+{{- if semverCompare ">=1.19-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1
+{{- else if semverCompare ">=1.14-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1beta1
+{{- else -}}
+apiVersion: extensions/v1beta1
+{{- end }}
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "munshi-platform.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if and .Values.ingress.className (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            {{- if and .pathType (semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion) }}
+            pathType: {{ .pathType }}
+            {{- end }}
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ $.Values.services.uiService.name }}
+                port:
+                  number: {{ $svcPort }}
+              {{- else }}
+              serviceName: {{ $.Values.services.uiService.name }}
+              servicePort: {{ $svcPort }}
+              {{- end }}
+          {{- end }}
+    {{- end }}
+---
+# API Gateway Ingress for backend services
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-api
+  labels:
+    {{- include "munshi-platform.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/secure-backends: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      rewrite ^(/api)$ $1/ redirect;
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if and .Values.ingress.className (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          # Auth Service Routes
+          - path: /api/auth(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.services.authService.name }}
+                port:
+                  number: {{ $.Values.services.authService.port }}
+          # Audio Service Routes
+          - path: /api/audio(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.services.audioService.name }}
+                port:
+                  number: {{ $.Values.services.audioService.port }}
+          # ASR Service Routes
+          - path: /api/asr(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.services.asrService.name }}
+                port:
+                  number: {{ $.Values.services.asrService.port }}
+          # Conversation Service Routes
+          - path: /api/conversation(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.services.conversationService.name }}
+                port:
+                  number: {{ $.Values.services.conversationService.port }}
+          # LLM Service Routes
+          - path: /api/llm(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.services.llmService.name }}
+                port:
+                  number: {{ $.Values.services.llmService.port }}
+          # Pronunciation Evaluator Routes
+          - path: /api/pronunciation(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Values.services.pronunciationEvaluator.name }}
+                port:
+                  number: {{ $.Values.services.pronunciationEvaluator.port }}
+    {{- end }}
+{{- end }}

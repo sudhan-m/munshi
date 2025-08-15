@@ -175,20 +175,20 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     return UserResponse.from_orm(db_user)
 
 
-@app.post("/auth/login", response_model=Token)
+@app.post("/auth/login")
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """
-    Authenticate user and return JWT access token.
+    Authenticate user and return JWT access token with user data.
     
     Accepts plaintext password, verifies against stored bcrypt hash,
-    and returns JWT token for accessing protected endpoints.
+    and returns JWT token along with user information for accessing protected endpoints.
     
     Args:
         user_credentials: Login credentials with plaintext password
         db: Database session dependency
         
     Returns:
-        Token: JWT access token and token type
+        dict: JWT access token, token type, and user data
         
     Raises:
         HTTPException: 401 if credentials are invalid
@@ -205,7 +205,14 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    # Return user data along with token
+    user_data = UserResponse.from_orm(user)
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "user": user_data.dict()
+    }
 
 
 @app.get("/auth/verify")

@@ -1,0 +1,20 @@
+# Cloud Run optimized requirements
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# PyTorch CPU-only for Cloud Run (smaller size, faster downloads)
+torch==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+torchaudio==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+
+# ML dependencies
+transformers>=4.30.0
+librosa>=0.10.0
+numpy<1.25.0  # Compatibility with librosa
+
+# Utilities
+python-dotenv==1.0.0
+
+# Cloud Run monitoring
+psutil==5.9.6

@@ -1,0 +1,212 @@
+# Production environment overrides
+environment: production
+
+# Production ingress with SSL
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: api.munshi.app
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: munshi-tls
+      hosts:
+        - api.munshi.app
+
+# Production replicas and resources
+services:
+  authService:
+    replicas: 3
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+
+  audioService:
+    replicas: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+  asrService:
+    replicas: 2
+    resources:
+      limits:
+        cpu: 4000m
+        memory: 8Gi
+      requests:
+        cpu: 2000m
+        memory: 4Gi
+    env:
+      - name: CLOUD_RUN_MODE
+        value: "false"
+      - name: GPU_SUPPORT
+        value: "cuda"
+      - name: MODEL_CACHE_SIZE
+        value: "3"
+    nodeSelector:
+      node-type: gpu-enabled
+
+  conversationService:
+    replicas: 3
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+
+  llmService:
+    replicas: 3
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+
+  pronunciationEvaluator:
+    replicas: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+  uiService:
+    replicas: 5
+    resources:
+      limits:
+        cpu: 300m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+# Production database configuration
+postgresql:
+  enabled: false  # Use external managed database in production
+  # Configure external database connection in secrets
+
+# Production Redis configuration
+redis:
+  enabled: false  # Use external managed Redis in production
+  # Configure external Redis connection in secrets
+
+# Enable autoscaling in production
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Enable pod disruption budget in production
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Production secrets - these should be managed externally
+secrets:
+  databaseCredentials:
+    type: Opaque
+    data:
+      auth-db-url: ""  # Set via external secret management
+      audio-db-url: ""  # Set via external secret management
+      conversation-db-url: ""  # Set via external secret management
+      
+  redisCredentials:
+    type: Opaque
+    data:
+      redis-url: ""  # Set via external secret management
+      
+  authSecrets:
+    type: Opaque
+    data:
+      jwt-secret: ""  # Set via external secret management
+      
+  llmSecrets:
+    type: Opaque
+    data:
+      google-api-key: ""  # Set via external secret management
+      openai-api-key: ""  # Set via external secret management
+
+# Production logging
+logging:
+  level: INFO
+  format: json
+
+# Production monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Network policies for security
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+  egress:
+    - to: []
+      ports:
+      - protocol: TCP
+        port: 53
+      - protocol: UDP
+        port: 53
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: kube-system
+
+# Security context for production
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  allowPrivilegeEscalation: false
+
+podSecurityContext:
+  fsGroup: 10001
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Cert-manager configuration for production
+certManager:
+  enabled: true
+  email: admin@munshi.app

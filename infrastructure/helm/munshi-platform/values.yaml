@@ -1,0 +1,376 @@
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Image configuration
+image:
+  registry: docker.io
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Security context
+podSecurityContext:
+  fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/secure-backends: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
+  hosts:
+    - host: munshi.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: munshi-tls
+      hosts:
+        - munshi.local
+
+# Services configuration
+services:
+  # Auth Service
+  authService:
+    enabled: true
+    name: auth-service
+    image:
+      repository: munshi/auth-service
+      tag: latest
+    port: 8001
+    targetPort: 8001
+    replicas: 2
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: database-credentials
+            key: auth-db-url
+      - name: REDIS_URL
+        valueFrom:
+          secretKeyRef:
+            name: redis-credentials
+            key: redis-url
+      - name: JWT_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: auth-secrets
+            key: jwt-secret
+
+  # Audio Service
+  audioService:
+    enabled: true
+    name: audio-service
+    image:
+      repository: munshi/audio-service
+      tag: latest
+    port: 8003
+    targetPort: 8003
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: database-credentials
+            key: audio-db-url
+      - name: STORAGE_BUCKET
+        valueFrom:
+          configMapKeyRef:
+            name: storage-config
+            key: audio-bucket
+
+  # ASR Service
+  asrService:
+    enabled: true
+    name: asr-service
+    image:
+      repository: munshi/asr-service
+      tag: latest
+    port: 8004
+    targetPort: 8004
+    replicas: 1
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 1000m
+        memory: 2Gi
+    env:
+      - name: CLOUD_RUN_MODE
+        value: "false"
+      - name: GPU_SUPPORT
+        value: "cpu"
+      - name: MODEL_CACHE_SIZE
+        value: "3"
+    nodeSelector:
+      node-type: cpu-intensive
+
+  # Conversation Service
+  conversationService:
+    enabled: true
+    name: conversation-service
+    image:
+      repository: munshi/conversation-service
+      tag: latest
+    port: 8005
+    targetPort: 8005
+    replicas: 2
+    resources:
+      limits:
+        cpu: 300m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: database-credentials
+            key: conversation-db-url
+
+  # LLM Service
+  llmService:
+    enabled: true
+    name: llm-service
+    image:
+      repository: munshi/llm-service
+      tag: latest
+    port: 8006
+    targetPort: 8006
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+    env:
+      - name: GOOGLE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: llm-secrets
+            key: google-api-key
+      - name: OPENAI_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: llm-secrets
+            key: openai-api-key
+
+  # Pronunciation Evaluator
+  pronunciationEvaluator:
+    enabled: true
+    name: pronunciation-evaluator
+    image:
+      repository: munshi/pronunciation-evaluator
+      tag: latest
+    port: 8007
+    targetPort: 8007
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+
+  # UI Service
+  uiService:
+    enabled: true
+    name: ui-service
+    image:
+      repository: munshi/ui-service
+      tag: latest
+    port: 8002
+    targetPort: 8002
+    replicas: 3
+    resources:
+      limits:
+        cpu: 200m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    env:
+      - name: AUTH_SERVICE_URL
+        value: "http://auth-service:8001"
+      - name: AUDIO_SERVICE_URL
+        value: "http://audio-service:8003"
+
+# Database configuration
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "postgres123"
+    database: "munshi"
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+  architecture: standalone
+
+# Redis configuration
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "redis123"
+  master:
+    persistence:
+      enabled: true
+      size: 2Gi
+
+# ConfigMaps
+configMaps:
+  storageConfig:
+    data:
+      audio-bucket: "munshi-audio-files"
+      
+# Secrets (these should be created separately in production)
+secrets:
+  databaseCredentials:
+    type: Opaque
+    data:
+      auth-db-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzMTIzQHBvc3RncmVzcWwtcHJpbWFyeTo1NDMyL211bnNoaV9hdXRo
+      audio-db-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzMTIzQHBvc3RncmVzcWwtcHJpbWFyeTo1NDMyL211bnNoaV9hdWRpbw==
+      conversation-db-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzMTIzQHBvc3RncmVzcWwtcHJpbWFyeTo1NDMyL211bnNoaV9jb252ZXJzYXRpb24=
+      
+  redisCredentials:
+    type: Opaque
+    data:
+      redis-url: cmVkaXM6Ly86cmVkaXMxMjNAcmVkaXMtbWFzdGVyOjYzNzk=
+      
+  authSecrets:
+    type: Opaque
+    data:
+      jwt-secret: bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLXByb2R1Y3Rpb24=
+      
+  llmSecrets:
+    type: Opaque
+    data:
+      google-api-key: ""  # Should be set during deployment
+      openai-api-key: ""  # Should be set during deployment
+
+# Health checks
+healthChecks:
+  enabled: true
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policies
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+# Monitoring
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Logging
+logging:
+  level: INFO
+  format: json
+
+# Cert-manager configuration
+certManager:
+  enabled: true
+  install: false  # Set to true if you want to install cert-manager as part of this chart
+  email: admin@munshi.dev
+
+# Environment-specific overrides
+environment: development

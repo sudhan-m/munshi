@@ -1,0 +1,45 @@
+# Example Terraform variables file for Munshi infrastructure on GCP
+# Copy this file to terraform.tfvars and update with your actual values
+
+# GCP Configuration
+project_id = "your-gcp-project-id"
+region = "us-central1"
+zone = "us-central1-a"
+cluster_name = "munshi-gke-cluster"
+
+# Environment Configuration
+namespace = "munshi-prod"
+environment = "production"
+image_registry = "gcr.io"
+
+# Secrets (these should be set via environment variables or secure vaults)
+# jwt_secret = "your-jwt-secret-here"
+# postgres_auth_password = "your-postgres-auth-password"
+# postgres_gateway_password = "your-postgres-gateway-password"
+# mongodb_password = "your-mongodb-password"
+
+# GCP-specific Configuration
+use_cloud_sql = true
+postgres_tier = "db-f1-micro"  # Use db-n1-standard-1 for production
+vpc_network = "projects/your-gcp-project-id/global/networks/default"
+
+# Replica Configuration
+auth_service_replicas = 2
+ui_service_replicas = 2
+audio_service_replicas = 2
+
+# HPA Configuration
+ui_service_min_replicas = 2
+ui_service_max_replicas = 10
+ui_service_cpu_target = 80
+ui_service_memory_target = 80
+
+# Resource Quotas
+total_cpu_requests = "2"
+total_memory_requests = "4Gi"
+total_cpu_limits = "4"
+total_memory_limits = "8Gi"
+max_pods = 50
+
+# Storage
+storage_class = "standard-rwo"  # or "ssd" for SSD persistent disks

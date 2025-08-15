@@ -1,0 +1,11 @@
+{{- range $name, $config := .Values.configMaps }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "munshi-platform.labels" $ | nindent 4 }}
+data:
+  {{- toYaml $config.data | nindent 2 }}
+---
+{{- end }}

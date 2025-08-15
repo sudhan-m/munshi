@@ -1,324 +1,349 @@
-# Project Structure
+# Munshi AI Language Learning Platform - Project Structure
 
-This document outlines the complete structure of the Munshi microservices project.
+This document outlines the complete structure of the Munshi AI-powered language learning platform with advanced microservices architecture.
 
 ## Root Directory
 
 ```
 munshi/
-├── README.md                           # Main project documentation
-├── Makefile                           # Simplified development commands
-├── .env.example                       # Environment variables template
-├── .gitignore                         # Git ignore patterns
+├── README.md                                   # Main project documentation
+├── Makefile                                   # Development commands
+├── .env.example                               # Environment variables template
+├── .gitignore                                # Git ignore patterns
 ├── scripts/
-│   └── deploy.sh                      # Universal deployment script (replaces all others)
+│   └── deploy.sh                              # Universal deployment script
 ├── infrastructure/
-│   └── helm/                          # Helm charts for Kubernetes deployment
-│       └── munshi/                    # Main Munshi chart
-│           ├── Chart.yaml             # Chart metadata with Linkerd dependencies
-│           ├── values.yaml            # Production defaults (all cloud environments)
-│           ├── values-local.yaml      # Docker Desktop overrides
-│           └── templates/             # Kubernetes resource templates
+│   └── helm/                                  # Helm charts for Kubernetes deployment
+│       └── munshi/                            # Main Munshi chart
+│           ├── Chart.yaml                     # Chart metadata
+│           ├── values.yaml                    # Production defaults
+│           ├── values-local.yaml              # Local development overrides
+│           ├── values-new-services.yaml       # AI services configuration
+│           └── templates/                     # Kubernetes resource templates
+│               ├── conversation-service.yaml   # Main orchestrator
+│               ├── asr-service.yaml           # GPU-optimized ASR
+│               ├── llm-service.yaml           # Anthropic integration
+│               ├── pronunciation-evaluator.yaml # Accuracy scoring
+│               ├── audio-service.yaml         # File storage
+│               ├── ui-service.yaml            # React frontend
+│               ├── auth-service.yaml          # Authentication
+│               ├── nginx-ingress.yaml         # NGINX ingress routing
+│               └── secrets.yaml               # Kubernetes secrets
 ├── services/
-│   ├── api-gateway/                   # API Gateway microservice
-│   ├── auth-service/                  # Authentication microservice
-│   └── shared/                        # Shared libraries and utilities
+│   ├── conversation-service/                  # 🎯 Main orchestrator
+│   ├── asr-service/                          # 🚀 Whisper ASR (GPU)
+│   ├── llm-service/                          # 🤖 Anthropic Claude
+│   ├── pronunciation-evaluator/               # 📊 Accuracy scoring
+│   ├── audio-service/                        # 🎵 File storage
+│   ├── ui-service/                           # 🎨 React frontend
+│   ├── auth-service/                         # 🔐 Authentication
+│   └── shared/                               # Common libraries
 ├── tests/
-│   ├── conftest.py                    # Test configuration and fixtures
-│   ├── e2e/                           # End-to-end tests
-│   └── performance/                   # Load and performance tests
+│   ├── conftest.py                           # Test configuration
+│   ├── e2e/                                  # End-to-end user journeys
+│   ├── integration/                          # Service integration tests
+│   └── load/                                 # Performance tests
 └── docs/
-    ├── architecture/                  # Architecture documentation
-    ├── CONFIGURATION.md               # Configuration guide
-    └── LINKERD_AUTHORIZATION.md       # Service mesh authorization
+    ├── architecture/                         # Architecture documentation
+    └── contributing/                         # Contribution guidelines
 ```
 
-## Authentication Service (`services/auth-service/`)
+## AI Services Overview
+
+### 🎯 Conversation Service (`services/conversation-service/`)
+
+Main orchestrator that coordinates all language learning workflows.
+
+```
+services/conversation-service/
+├── main.py                      # FastAPI application
+├── models.py                    # Pydantic data models
+├── database.py                  # MongoDB configuration
+├── requirements.txt             # Dependencies
+├── Dockerfile                   # Docker build configuration
+└── README.md                    # Service documentation
+```
+
+**Purpose**: Orchestrate conversations, manage user profiles, coordinate between AI services.
+**Database**: MongoDB for conversation history and user learning analytics.
+**Key Features**: Chat management, pronunciation evaluation workflow, RAG preparation.
+
+### 🚀 ASR Service (`services/asr-service/`) - GPU Optimized
+
+Speech recognition service using Whisper models.
+
+```
+services/asr-service/
+├── main.py                      # FastAPI application
+├── models.py                    # Request/response models
+├── requirements.txt             # Dependencies (includes transformers, torch)
+├── Dockerfile                   # Docker build with CUDA support
+└── README.md                    # Service documentation
+```
+
+**Purpose**: Convert speech to text using pre-trained Whisper models.
+**Models**: English (large-v2), Tamil (fine-tuned), Malayalam (medium).
+**Key Features**: GPU optimization, model caching, multi-language support.
+
+### 🤖 LLM Service (`services/llm-service/`)
+
+Anthropic Claude API integration for conversation and transliteration.
+
+```
+services/llm-service/
+├── main.py                      # FastAPI application
+├── models.py                    # Request/response models
+├── requirements.txt             # Dependencies (includes anthropic)
+├── Dockerfile                   # Docker build configuration
+└── README.md                    # Service documentation
+```
+
+**Purpose**: Generate conversations, transliterate text, provide feedback.
+**API**: Anthropic Claude 3 Sonnet with 200K context window.
+**Key Features**: Multi-endpoint design, conversation generation, transliteration.
+
+### 📊 Pronunciation Evaluator (`services/pronunciation-evaluator/`)
+
+Pronunciation accuracy scoring and error analysis.
+
+```
+services/pronunciation-evaluator/
+├── main.py                      # FastAPI application
+├── models.py                    # Evaluation models
+├── requirements.txt             # Dependencies (includes jiwer)
+├── Dockerfile                   # Docker build configuration
+└── README.md                    # Service documentation
+```
+
+**Purpose**: Calculate pronunciation accuracy and provide detailed feedback.
+**Key Features**: Word-level error analysis, accuracy metrics, motivational feedback.
+
+### 🎵 Audio Service (`services/audio-service/`)
+
+Pure audio file storage and retrieval service.
+
+```
+services/audio-service/
+├── main.py                      # FastAPI application
+├── models.py                    # Audio metadata models
+├── database.py                  # MongoDB configuration
+├── storage.py                   # File storage logic
+├── requirements.txt             # Dependencies
+├── Dockerfile                   # Docker build configuration
+└── README.md                    # Service documentation
+```
+
+**Purpose**: Handle audio file upload, storage, and retrieval.
+**Database**: MongoDB for metadata, file system for audio files.
+**Key Features**: Upload/download endpoints, metadata management.
+
+### 🎨 UI Service (`services/ui-service/`)
+
+Modern React frontend with conversational interface.
+
+```
+services/ui-service/
+├── server.py                    # FastAPI server for SPA
+├── requirements.txt             # Python dependencies
+├── Dockerfile                   # Docker build configuration
+├── package.json                 # Node.js dependencies
+├── vite.config.js              # Vite build configuration
+├── src/                         # React application source
+│   ├── App.jsx                 # Main application component
+│   ├── components/             # React components
+│   │   ├── ChatInterface.jsx   # Main chat interface
+│   │   ├── AudioRecorder.jsx   # Audio recording component
+│   │   ├── Login.jsx           # Authentication components
+│   │   └── Register.jsx
+│   ├── contexts/               # React contexts
+│   │   └── AuthContext.jsx     # Authentication context
+│   └── index.css               # Global styles with animations
+├── dist/                        # Built assets
+└── README.md                    # Service documentation
+```
+
+**Purpose**: Provide modern conversational UI for language learning.
+**Technology**: React + Vite for fast development, FastAPI for serving.
+**Key Features**: Real-time chat, pronunciation practice, progress tracking.
+
+### 🔐 Authentication Service (`services/auth-service/`)
+
+JWT-based authentication and user management.
 
 ```
 services/auth-service/
-├── __init__.py                  # Package initialization
-├── main.py                      # FastAPI application and endpoints
-├── auth.py                      # Authentication utilities and password hashing
-├── cache.py                     # Redis cache utilities and session management
-├── config.py                    # Configuration management
-├── database.py                  # Database configuration and session management
-├── requirements.txt             # Python dependencies
-├── Dockerfile                   # Multi-stage Docker build
+├── main.py                      # FastAPI application
+├── auth.py                      # Authentication logic
+├── models.py                    # User data models
+├── database.py                  # PostgreSQL configuration
+├── requirements.txt             # Dependencies
+├── Dockerfile                   # Docker build configuration
 └── README.md                    # Service documentation
 ```
 
-### Authentication Service Features
+**Purpose**: Handle user login, registration, and JWT token management.
+**Database**: PostgreSQL for user data, Redis for token caching.
+**Key Features**: Secure authentication, token refresh, user management.
 
-- **Secure Authentication**: Server-side bcrypt password hashing with strong validation
-- **JWT Token Management**: Stateless token-based authentication with Redis blacklisting
-- **User Session Caching**: 1-hour Redis-cached session data for fast user lookups
-- **Account Security**: Failed login tracking and automatic account lockout (5 attempts)
-- **Token Blacklisting**: Instant logout with Redis-powered JWT invalidation
-- **User Management**: Registration, login, logout, profile endpoints
-- **Dedicated Database**: PostgreSQL on port 5433 (auth_db)
-- **Dedicated Redis**: Redis on port 6380 (database 1) for security and session features
-- **Independent Deployment**: Can be deployed separately from other services
+### Shared Components (`services/shared/`)
 
-## API Gateway Service (`services/api-gateway/`)
+Minimal shared utilities across services.
 
 ```
-services/api-gateway/
-├── __init__.py                  # Package initialization
-├── main.py                      # FastAPI application and main routes
-├── router.py                    # Request routing and service discovery
-├── middleware.py                # Authentication, rate limiting, and caching middleware
-├── cache.py                     # Redis cache utilities for performance and rate limiting
-├── database.py                  # Database models and connection management
-├── config.py                    # Configuration management
-├── requirements.txt             # Python dependencies
-├── Dockerfile                   # Multi-stage Docker build
-└── README.md                    # Service documentation
+services/shared/
+├── auth/                        # Authentication utilities
+│   ├── jwt_handler.py          # JWT token handling
+│   └── middleware.py           # Auth middleware
+├── config/                      # Configuration utilities
+│   └── config_loader.py        # Config loading helpers
+└── utils/                       # General utilities
+    ├── helpers.py              # Helper functions
+    └── validators.py           # Input validation
 ```
 
-### API Gateway Features
+## Advanced AI Architecture
 
-- **Advanced Rate Limiting**: Redis-based sliding window algorithm (1000-5000 req/min)
-- **Response Caching**: Intelligent GET request caching with configurable TTL
-- **Service Discovery**: Dynamic service registration and health monitoring with Redis cache
-- **Authentication Middleware**: JWT token validation with blacklist checking
-- **Request Proxying**: Intelligent routing to backend microservices with connection pooling
-- **Circuit Breaker**: Distributed failure state tracking in Redis
-- **Enhanced Logging**: Request tracing with correlation IDs and timing information
-- **Caddy Integration**: Optimized reverse proxy with TLS termination and compression
-- **Dedicated Database**: PostgreSQL on port 5434 (gateway_db)
-- **Dedicated Redis**: Redis on port 6381 (database 0) for performance and caching features
-
-## Database Architecture
-
-### Authentication Service Database (auth_db)
-- **Port**: 5433
-- **Tables**:
-  - `users`: User accounts and authentication data
-- **Redis Cache**: Port 6380 (database 1) for auth-specific features:
-  - **Token Blacklist**: `blacklist:token:{token}` - Blacklisted JWT tokens
-  - **User Sessions**: `session:user:{user_id}` - Cached user session data
-  - **Failed Attempts**: `failed_attempts:{email}` - Login attempt counters
-  - **Account Locks**: `account_locked:{email}` - Temporary account lockouts
-
-### API Gateway Database (gateway_db)
-- **Port**: 5434
-- **Tables**:
-  - `service_registry`: Registered microservices and health status
-  - `request_logs`: HTTP request/response logging (optional)
-- **Redis Cache**: Port 6381 (database 0) for performance features:
-  - **Rate Limiting**: `rate_limit:{client_id}` - Sliding window rate counters (Redis sorted sets)
-  - **Response Cache**: `response_cache:{hash}` - Cached GET responses with TTL
-  - **Service Cache**: `service:{service_name}` - Service discovery information
-  - **Circuit Breaker**: `circuit_breaker:{service}` - Service failure state tracking
-
-## Service Communication
+### Service Communication Flow
 
 ```mermaid
-graph LR
-    subgraph "Client Layer"
-        CLIENT[Client Applications]
+graph TB
+    subgraph "External"
+        USER[User Browser]
+        ANTHROPIC[Anthropic Claude API]
     end
     
-    subgraph "Ingress Layer"
-        CADDY[Caddy Reverse Proxy<br/>Port 443<br/>TLS Termination<br/>Request Tracing<br/>Compression]
+    subgraph "NGINX Ingress Layer"
+        NGINX[NGINX Ingress<br/>Port 30080]
     end
     
-    subgraph "Gateway Layer"
-        GATEWAY[API Gateway<br/>Port 8000<br/>Service Discovery<br/>Rate Limiting<br/>Response Caching]
+    subgraph "Frontend Layer"
+        UI[UI Service<br/>Port 8002<br/>React SPA]
     end
     
-    subgraph "Service Layer"
-        AUTH[Auth Service<br/>Port 8001<br/>JWT Management<br/>User Authentication]
-        OTHER[Other Microservices<br/>Future Services]
+    subgraph "Core Services"
+        CONV[Conversation Service<br/>Port 8007<br/>Main Orchestrator]
+        AUTH[Auth Service<br/>Port 8001<br/>JWT Authentication]
+        AUDIO[Audio Service<br/>Port 8003<br/>File Storage]
     end
     
-    CLIENT -->|HTTPS| CADDY
-    CADDY -->|HTTP| GATEWAY
-    GATEWAY -->|mTLS| AUTH
-    GATEWAY -->|HTTP| OTHER
+    subgraph "AI Processing Layer"
+        ASR[ASR Service<br/>Port 8004<br/>Whisper GPU]
+        LLM[LLM Service<br/>Port 8005<br/>Anthropic API]
+        EVAL[Pronunciation Evaluator<br/>Port 8006<br/>Accuracy Scoring]
+    end
     
-    classDef client fill:#fff3e0,stroke:#333,stroke-width:2px
-    classDef ingress fill:#ff9800,stroke:#333,stroke-width:2px
-    classDef gateway fill:#e1f5fe,stroke:#333,stroke-width:2px
-    classDef service fill:#e8f5e8,stroke:#333,stroke-width:2px
+    subgraph "Data Layer"
+        MONGO[(MongoDB<br/>Conversations)]
+        PG[(PostgreSQL<br/>Auth)]
+        REDIS[(Redis<br/>Cache)]
+    end
     
-    class CLIENT client
-    class CADDY ingress
-    class GATEWAY gateway
-    class AUTH,OTHER service
+    USER --> NGINX
+    NGINX --> UI
+    NGINX --> CONV
+    NGINX --> AUTH
+    NGINX --> AUDIO
+    
+    UI -.-> CONV
+    CONV --> ASR
+    CONV --> LLM
+    CONV --> EVAL
+    CONV --> AUDIO
+    CONV --> MONGO
+    
+    LLM --> ANTHROPIC
+    AUTH --> PG
+    AUTH --> REDIS
 ```
 
-### Enhanced Authentication Flow
-1. Client sends plaintext credentials over HTTPS: `POST /auth/login`
-2. Auth service checks Redis cache for account lockout status
-3. Auth service validates password with bcrypt and increments failed attempts if invalid
-4. On successful auth, auth service caches user session and returns JWT token
-5. Client includes JWT token in subsequent requests to gateway
-6. Gateway validates token with auth service and checks Redis blacklist: `GET /auth/verify`
-7. Gateway caches authentication results and forwards requests to backend services
-8. On logout, JWT token is added to Redis blacklist: `POST /auth/logout`
+### Routing Logic
 
-### Redis Cache Integration
-- **Authentication**: Token blacklist checking happens before JWT validation
-- **Rate Limiting**: Sliding window counters track requests per client
-- **Response Caching**: GET requests cached based on URL and headers
-- **Session Management**: User data cached for 1 hour to reduce database load
+- **NGINX Ingress**: SSL termination, load balancing, and intelligent path-based routing (Port 30080)
+  - `/` → UI Service (React SPA with client-side routing)
+  - `/api/conversation/*` → Conversation Service (main orchestrator) 
+  - `/api/audio/*` → Audio Service (file operations)
+  - `/api/auth/*` → Auth Service (authentication)
+  - Health checks distributed across services
 
-## Security Features
+### Service Orchestration
 
-### Password Security
-- **HTTPS Transmission**: Passwords sent securely over TLS to auth service
-- **Server-Side Hashing**: Bcrypt with salt rounds=12 for secure storage
-- **Failed Attempt Tracking**: Redis-based sliding window tracking (15-min TTL)
-- **Account Lockout**: Automatic 15-minute lockout after 5 failed attempts
-- **Strong Validation**: Minimum 8 chars with uppercase, lowercase, and numbers
+The **Conversation Service** acts as the main orchestrator:
 
-### Service Isolation
-- **Separate Databases**: Each service has its own PostgreSQL database
-- **Separate Configuration**: Independent environment variables and settings
-- **Separate Deployment**: Services can be deployed and scaled independently
+1. **Text Conversations**: User → Conv → LLM → User
+2. **Pronunciation Evaluation**: 
+   - User audio → Audio Service (storage)
+   - Conv → ASR Service (transcription)
+   - Conv → LLM Service (transliteration) 
+   - Conv → Evaluator (scoring)
+   - Conv → LLM Service (feedback)
+   - Results → User
 
-### Authentication
-- **JWT Tokens**: Stateless authentication with configurable expiration
-- **Token Blacklisting**: Redis-powered instant logout and token invalidation
-- **Token Validation**: Centralized verification via auth service with blacklist checking
-- **User Context**: User information injected into proxied requests
-- **Session Caching**: 1-hour cached user sessions for improved performance
+### Deployment Architecture
 
-## Deployment Options
+- **Local Development**: Docker Desktop with CPU fallback for ASR
+- **Production**: Kubernetes with GPU nodes for ASR service
+- **Ingress**: NGINX for SSL termination and intelligent routing
+- **Service Discovery**: Kubernetes DNS-based discovery
+- **Secrets Management**: Kubernetes secrets for API keys and credentials
 
-### 1. Kubernetes with Linkerd (Recommended)
-```bash
-./deploy.sh k8s production
+## Key Design Principles
+
+1. **AI-First Architecture**: Services designed around AI processing capabilities
+2. **Service Orchestration**: Clear orchestrator pattern with Conversation Service
+3. **Single Responsibility**: Each service has one specific AI or infrastructure purpose
+4. **Stateless Design**: Services are stateless for horizontal scaling (except data stores)
+5. **GPU Optimization**: Dedicated GPU resources for computationally intensive AI tasks
+6. **API-First**: All services communicate via well-defined REST APIs
+7. **Fault Isolation**: AI service failures don't cascade to core application
+8. **Environment Adaptability**: CPU fallback for local development, GPU for production
+
+## Data Flow Patterns
+
+### Conversational Learning Flow
 ```
-- Automatic mTLS between all services
-- Built-in observability and metrics
-- Service profiles for traffic management
-- Production-ready with high availability
-
-### 2. Complete Microservices Deployment (Traditional)
-```bash
-docker-compose -f docker-compose.microservices.yml up -d
-```
-- Manual mTLS configuration
-- Services communicate via Docker network
-- Traditional microservices approach
-
-### 3. Linkerd-Compatible Development
-```bash
-./deploy.sh docker development
-```
-- Linkerd-ready service configuration
-- Enhanced observability stack
-- Development-friendly setup
-
-### 4. Independent Service Deployment
-
-**Auth Service Only**:
-```bash
-cd src/auth_service
-docker-compose up -d
+User Input → UI → Conversation Service → LLM Service → Response
 ```
 
-**Gateway Only**:
-```bash
-cd src/api-gateway
-docker-compose up -d
+### Pronunciation Evaluation Flow
+```
+Audio Recording → Audio Service → Conversation Service → ASR Service → 
+LLM Service (transliteration) → Evaluator Service → LLM Service (feedback) → 
+Conversation Service → UI → User
 ```
 
-### 5. Development Setup
-```bash
-# Auth Service
-cd src/auth_service
-pip install -r requirements.txt
-python -m uvicorn main:app --port 8001
-
-# API Gateway
-cd src/api-gateway
-pip install -r requirements.txt
-python -m uvicorn main:app --port 8000
+### User Profile Management
+```
+User Actions → Conversation Service → MongoDB → Analytics & Progress Tracking
 ```
 
-## Environment Configuration
+## Development Workflow
 
-Each service uses environment variables for configuration:
+1. **Local Setup**: Use `make deploy` with automatic environment detection
+2. **Service Development**: Each service can be developed and tested independently
+3. **Integration Testing**: End-to-end tests verify complete AI workflows
+4. **GPU Testing**: Local CPU fallback, production GPU validation
+5. **Deployment**: Single Helm chart deploys entire AI platform
 
-### Auth Service Environment Variables
-- `AUTH_DATABASE_URL`: PostgreSQL connection for auth database
-- `AUTH_REDIS_URL`: Redis connection for auth service
-- `JWT_SECRET_KEY`: Secret key for JWT token signing
-- `ACCESS_TOKEN_EXPIRE_MINUTES`: Token expiration time
+## Scalability Considerations
 
-### Gateway Environment Variables
-- `GATEWAY_DATABASE_URL`: PostgreSQL connection for gateway database
-- `GATEWAY_REDIS_URL`: Redis connection for gateway service
-- `AUTH_SERVICE_URL`: URL of the authentication service
-- `RATE_LIMIT_REQUESTS`: Rate limiting configuration
+### Horizontal Scaling
+- **UI Service**: Multiple replicas for web traffic
+- **Conversation Service**: Main bottleneck, scale based on user load
+- **LLM Service**: Scale based on conversation volume
+- **ASR Service**: GPU-limited, scale with GPU availability
+- **Evaluator Service**: CPU-bound, easily scalable
 
-## API Endpoints
+### Vertical Scaling
+- **ASR Service**: Requires GPU memory for large Whisper models
+- **LLM Service**: Network-bound to Anthropic API
+- **Conversation Service**: Memory for orchestration state
+- **Audio Service**: Storage I/O optimization
 
-### Authentication Service (Port 8001)
-- `POST /auth/register` - Register new user with plaintext password over HTTPS
-- `POST /auth/login` - Login with plaintext password over HTTPS (with rate limiting)
-- `POST /auth/logout` - Logout user and blacklist JWT token (authenticated)
-- `GET /auth/verify` - Verify JWT token with blacklist checking (used by gateway)
-- `GET /auth/me` - Get current user information with session caching
-- `GET /health` - Service health check
+## Future Enhancements
 
-### API Gateway (Port 8000) via Caddy (Port 443)
-- `GET /health` - Gateway health check (bypasses rate limiting)
-- `GET /services` - List registered services (authenticated)
-- `POST /services/{name}` - Register new service (authenticated)
-- `DELETE /services/{name}` - Unregister service (authenticated)
-- `* /auth/*` - Proxy to authentication service (Redis rate limited)
-- `* /protected/{service}/*` - Proxy to services (authentication required, cached)
-
-### Rate Limiting and Caching
-- **Anonymous Users**: 1000 requests/minute
-- **Authenticated Users**: 5000 requests/minute
-- **GET Response Caching**: 5-10 minute TTL based on content type
-- **Failed Login Protection**: 5 attempts per 15-minute window
-
-## Monitoring and Observability
-
-### Health Checks
-- Each service provides `/health` endpoint
-- Docker health checks configured for all containers
-- Gateway monitors backend service health
-
-### Logging
-- Structured logging with request IDs
-- Separate log files for each service
-- HTTP access logs in gateway
-- Error logs with stack traces
-
-### Request Tracing
-- Unique request IDs for each HTTP request
-- Request/response timing
-- User context in logs
-- Cross-service request correlation
-
-## Development Guidelines
-
-### Adding New Services
-1. Create new directory in `src/`
-2. Follow the same structure as existing services
-3. Add service configuration to gateway
-4. Update docker-compose files
-5. Document endpoints and configuration
-
-### Security Considerations
-- Never transmit plaintext passwords
-- Always validate inputs
-- Use prepared statements for database queries
-- Implement proper CORS policies
-- Use HTTPS in production
-- Rotate JWT secrets regularly
-
-### Testing
-- Unit tests for business logic
--Integration tests for API endpoints
-- End-to-end tests for authentication flow
-- Load testing for performance validation
-- Security testing for vulnerability assessment
+- **RAG Integration**: Vector database for personalized learning content
+- **Model Serving**: Custom model deployment for specialized tasks
+- **Real-time Features**: WebSocket support for live conversation
+- **Mobile Support**: API optimizations for mobile applications
+- **Multi-tenancy**: Support for multiple organizations/schools
+- **Advanced Analytics**: Learning progress insights and recommendations

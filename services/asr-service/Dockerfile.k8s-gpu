@@ -1,0 +1,139 @@
+# Multi-stage Dockerfile optimized for Kubernetes GPU instances
+# Stage 1: Build dependencies and download models
+FROM nvidia/cuda:11.8-devel-ubuntu20.04 as builder
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3.11-venv \
+    python3-pip \
+    build-essential \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create Python alias
+RUN ln -s /usr/bin/python3.11 /usr/bin/python
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
+
+# Copy requirements and install dependencies
+COPY requirements.txt .
+
+# Install PyTorch with CUDA support
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Install other Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download your original models for faster startup
+RUN python -c "
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
+import torch
+
+# Download GPU-optimized models (your original choices)
+print('Downloading whisper-large-v2 for English...')
+WhisperForConditionalGeneration.from_pretrained('openai/whisper-large-v2')
+WhisperProcessor.from_pretrained('openai/whisper-large-v2')
+
+print('Downloading whisper-tamil-large-v2...')
+try:
+    WhisperForConditionalGeneration.from_pretrained('vasista22/whisper-tamil-large-v2')
+    WhisperProcessor.from_pretrained('vasista22/whisper-tamil-large-v2')
+    print('Tamil model downloaded successfully')
+except Exception as e:
+    print(f'Tamil model download failed: {e}, using fallback')
+    WhisperForConditionalGeneration.from_pretrained('openai/whisper-large-v2')
+    WhisperProcessor.from_pretrained('openai/whisper-large-v2')
+
+print('Downloading whisper-medium-ml for Malayalam...')
+try:
+    WhisperForConditionalGeneration.from_pretrained('thennal/whisper-medium-ml')
+    WhisperProcessor.from_pretrained('thennal/whisper-medium-ml')
+    print('Malayalam model downloaded successfully')
+except Exception as e:
+    print(f'Malayalam model download failed: {e}, using fallback')
+    WhisperForConditionalGeneration.from_pretrained('openai/whisper-large-v2')
+    WhisperProcessor.from_pretrained('openai/whisper-large-v2')
+
+# Also download base models as fallbacks
+print('Downloading whisper-base as fallback...')
+WhisperForConditionalGeneration.from_pretrained('openai/whisper-base')
+WhisperProcessor.from_pretrained('openai/whisper-base')
+
+print('All models downloaded successfully!')
+"
+
+# Stage 2: Runtime image with CUDA runtime
+FROM nvidia/cuda:11.8-runtime-ubuntu20.04 as runtime
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create Python alias
+RUN ln -s /usr/bin/python3.11 /usr/bin/python
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy model cache from builder
+COPY --from=builder /root/.cache /root/.cache
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY . .
+
+# Kubernetes GPU environment variables
+ENV CLOUD_RUN_MODE=false
+ENV FALLBACK_MODE=false
+ENV GPU_SUPPORT=cuda
+ENV MODEL_CACHE_SIZE=3
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# CUDA environment variables
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Optimize for GPU inference
+ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6"
+ENV FORCE_CUDA=1
+
+# Create non-root user for security (if GPU allows)
+RUN groupadd -r asr && useradd -r -g asr asr || true
+RUN chown -R asr:asr /app /root/.cache || true
+
+# Expose port
+EXPOSE 8004
+
+# Health check for Kubernetes
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
+    CMD curl -f http://localhost:8004/health || exit 1
+
+# Use exec form for better signal handling
+CMD ["python", "main.py"]

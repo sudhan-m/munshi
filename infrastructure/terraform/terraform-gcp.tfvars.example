@@ -1,45 +1,51 @@
-# Example Terraform variables file for Munshi infrastructure on GCP
-# Copy this file to terraform.tfvars and update with your actual values
+# Example Terraform variables for GCP deployment with pronunciation profiling
+# Copy this file to terraform.tfvars and fill in your values
 
 # GCP Configuration
-project_id = "your-gcp-project-id"
-region = "us-central1"
-zone = "us-central1-a"
-cluster_name = "munshi-gke-cluster"
+project_id   = "central-list-469110-f1"
+region       = "us-central1"
+zone         = "us-central1-a"
+cluster_name = "munshi-cluster"
 
-# Environment Configuration
-namespace = "munshi-prod"
-environment = "production"
-image_registry = "gcr.io"
+# Environment
+environment = "production"  # or "staging", "development"
+namespace   = "munshi-prod"
 
-# Secrets (these should be set via environment variables or secure vaults)
-# jwt_secret = "your-jwt-secret-here"
-# postgres_auth_password = "your-postgres-auth-password"
-# postgres_gateway_password = "your-postgres-gateway-password"
-# mongodb_password = "your-mongodb-password"
+# Secrets (set these via environment variables or GCP Secret Manager)
+# jwt_secret                  = "your-very-secure-jwt-secret-256-bits"
+# postgres_auth_password      = "your-secure-postgres-auth-password"
+# postgres_gateway_password   = "your-secure-postgres-gateway-password"
 
-# GCP-specific Configuration
-use_cloud_sql = true
-postgres_tier = "db-f1-micro"  # Use db-n1-standard-1 for production
-vpc_network = "projects/your-gcp-project-id/global/networks/default"
+# MongoDB (use MongoDB Atlas or other cloud provider)
+# mongodb_url      = "mongodb+srv://username:password@cluster.mongodb.net/"
+# mongodb_database = "munshi"
+# mongodb_username = "munshi_user"
+# mongodb_password = "your-secure-mongodb-password"
 
-# Replica Configuration
-auth_service_replicas = 2
-ui_service_replicas = 2
+# Google API Key for LLM service (Gemini)
+# google_api_key = "your-google-gemini-api-key"
+
+# Replica counts for pronunciation profiling
+auth_service_replicas  = 2
+ui_service_replicas    = 3
 audio_service_replicas = 2
 
-# HPA Configuration
-ui_service_min_replicas = 2
-ui_service_max_replicas = 10
-ui_service_cpu_target = 80
-ui_service_memory_target = 80
+# Resource quotas (increased for pronunciation profiling workloads)
+total_cpu_requests    = "8"
+total_memory_requests = "16Gi"
+total_cpu_limits      = "16"
+total_memory_limits   = "32Gi"
+max_pods             = 150
 
-# Resource Quotas
-total_cpu_requests = "2"
-total_memory_requests = "4Gi"
-total_cpu_limits = "4"
-total_memory_limits = "8Gi"
-max_pods = 50
+# GCP-specific
+use_cloud_sql   = false  # Using external MongoDB instead
+postgres_tier   = "db-f1-micro"
+vpc_network     = "default"
 
 # Storage
-storage_class = "standard-rwo"  # or "ssd" for SSD persistent disks
+storage_class = "standard-rwo"
+
+# GKE cluster (optimized for pronunciation profiling)
+node_count                   = 3
+machine_type                = "e2-standard-4"
+enable_memory_intensive_pool = true  # For LLM and ASR services

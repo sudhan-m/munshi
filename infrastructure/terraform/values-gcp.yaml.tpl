@@ -1,36 +1,36 @@
-# GCP-specific Terraform-managed values for Munshi Helm chart
+# GCP-specific Terraform-managed values for Munshi pronunciation profiling platform
 
 # Global settings
 global:
-  imageRegistry: ${image_registry}
+  imageRegistry: ${artifact_registry_url}
   imagePullPolicy: IfNotPresent
 
 # Environment
 environment: ${environment}
-namespace: munshi-prod
+namespace: ${namespace}
 
-# Images (using GCP Container Registry)
+# Images (using GCP Artifact Registry)
 images:
   authService:
-    repository: ${image_registry}/${project_id}/munshi/auth-service
+    repository: ${artifact_registry_url}/munshi-auth-service
     tag: latest
   uiService:
-    repository: ${image_registry}/${project_id}/ui-service
+    repository: ${artifact_registry_url}/munshi-ui-service
     tag: latest
   audioService:
-    repository: ${image_registry}/${project_id}/munshi/audio-service
-    tag: v3
+    repository: ${artifact_registry_url}/munshi-audio-service
+    tag: latest
   asrService:
-    repository: ${image_registry}/${project_id}/munshi/asr-service
+    repository: ${artifact_registry_url}/munshi-asr-service
     tag: latest
   llmService:
-    repository: ${image_registry}/${project_id}/munshi/llm-service
+    repository: ${artifact_registry_url}/munshi-llm-service
     tag: latest
   pronunciationEvaluator:
-    repository: ${image_registry}/${project_id}/munshi/pronunciation-evaluator
+    repository: ${artifact_registry_url}/munshi-pronunciation-evaluator
     tag: latest
   conversationService:
-    repository: ${image_registry}/${project_id}/munshi/conversation-service
+    repository: ${artifact_registry_url}/munshi-conversation-service
     tag: latest
 
 # Replica counts (managed by Terraform)
@@ -38,11 +38,12 @@ replicaCount:
   authService: ${auth_service_replicas}
   uiService: ${ui_service_replicas}
   audioService: ${audio_service_replicas}
-  postgres: 1
-  redis: 1
-  mongodb: 1
+  asrService: 2
+  llmService: 2
+  pronunciationEvaluator: 2
+  conversationService: 3
 
-# Resources
+# Resources optimized for pronunciation profiling
 resources:
   authService:
     requests:
@@ -53,25 +54,11 @@ resources:
       cpu: "200m"
   uiService:
     requests:
-      memory: "128Mi"
-      cpu: "50m"
-    limits:
-      memory: "256Mi"
-      cpu: "200m"
-  postgres:
-    requests:
       memory: "256Mi"
       cpu: "100m"
     limits:
       memory: "512Mi"
-      cpu: "300m"
-  redis:
-    requests:
-      memory: "64Mi"
-      cpu: "50m"
-    limits:
-      memory: "128Mi"
-      cpu: "100m"
+      cpu: "500m"
   audioService:
     requests:
       memory: "256Mi"
@@ -79,13 +66,48 @@ resources:
     limits:
       memory: "512Mi"
       cpu: "300m"
-  mongodb:
+  asrService:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+    nodeSelector:
+      workload-type: memory-intensive
+    tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "memory-intensive"
+        effect: "NoSchedule"
+  llmService:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+    nodeSelector:
+      workload-type: memory-intensive
+    tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "memory-intensive"
+        effect: "NoSchedule"
+  pronunciationEvaluator:
     requests:
       memory: "256Mi"
-      cpu: "100m"
+      cpu: "200m"
     limits:
       memory: "512Mi"
-      cpu: "300m"
+      cpu: "500m"
+  conversationService:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
 
 # Service configuration
 services:
@@ -95,41 +117,69 @@ services:
   uiService:
     type: ClusterIP
     port: 8002
-  postgres:
-    port: 5432
-  redis:
-    port: 6379
   audioService:
     type: ClusterIP
     port: 8003
-  mongodb:
-    port: 27017
+  asrService:
+    type: ClusterIP
+    port: 8004
+  llmService:
+    type: ClusterIP
+    port: 8005
+  pronunciationEvaluator:
+    type: ClusterIP
+    port: 8006
+  conversationService:
+    type: ClusterIP
+    port: 8007
 
-# Environment variables (GCP-specific)
+# Environment variables (GCP-specific with pronunciation profiling)
 env:
   authService:
     ENVIRONMENT: "${environment}"
     DEBUG: "false"
     AUTH_SERVICE_HOST: "0.0.0.0"
     AUTH_SERVICE_PORT: "8001"
-    %{ if cloud_sql_instance != "" }
-    POSTGRES_HOST: "/cloudsql/${cloud_sql_instance}"
-    %{ endif }
   uiService:
     ENVIRONMENT: "${environment}"
     DEBUG: "false"
     UI_SERVICE_HOST: "0.0.0.0"
     UI_SERVICE_PORT: "8002"
-    REAL_TIME_FEEDBACK_ENABLED: "true"
-    OFFLINE_MODE_ENABLED: "false"
-    ANALYTICS_ENABLED: "true"
+    PRONUNCIATION_PROFILING_ENABLED: "true"
+    CONVERSATION_SERVICE_URL: "http://conversation-service:8007"
   audioService:
     ENVIRONMENT: "${environment}"
     DEBUG: "false"
     AUDIO_SERVICE_HOST: "0.0.0.0"
     AUDIO_SERVICE_PORT: "8003"
-    GCS_BUCKET_NAME: "${gcs_bucket_name}"
+    GCS_BUCKET_NAME: "${audio_storage_bucket}"
     GOOGLE_CLOUD_PROJECT: "${project_id}"
+  asrService:
+    ENVIRONMENT: "${environment}"
+    ASR_SERVICE_HOST: "0.0.0.0"
+    ASR_SERVICE_PORT: "8004"
+    MODEL_STORAGE_BUCKET: "${model_storage_bucket}"
+    CLOUD_RUN_MODE: "false"
+    GPU_SUPPORT: "cpu"
+    FALLBACK_MODE: "true"
+  llmService:
+    ENVIRONMENT: "${environment}"
+    LLM_SERVICE_HOST: "0.0.0.0"
+    LLM_SERVICE_PORT: "8005"
+    GOOGLE_API_KEY_SECRET: "google-api-keys"
+  pronunciationEvaluator:
+    ENVIRONMENT: "${environment}"
+    EVALUATOR_SERVICE_HOST: "0.0.0.0"
+    EVALUATOR_SERVICE_PORT: "8006"
+  conversationService:
+    ENVIRONMENT: "${environment}"
+    CONVERSATION_SERVICE_HOST: "0.0.0.0"
+    CONVERSATION_SERVICE_PORT: "8007"
+    ASR_SERVICE_URL: "http://asr-service:8004"
+    LLM_SERVICE_URL: "http://llm-service:8005"
+    EVALUATOR_SERVICE_URL: "http://pronunciation-evaluator:8006"
+    AUDIO_SERVICE_URL: "http://audio-service:8003"
+    MONGODB_URL_SECRET: "database-credentials"
 
 # Security
 securityContext:
@@ -150,12 +200,11 @@ serviceAccount:
 
 # Secrets (references to Terraform-managed secrets)
 secrets:
-  jwtSecretRef: ${jwt_secret_name}
-  postgres:
-    authSecretRef: ${postgres_auth_secret_name}
-    gatewaySecretRef: ${postgres_gateway_secret_name}
-  mongodb:
-    secretRef: ${mongodb_secret_name}
+  jwtSecretRef: jwt-secret
+  database:
+    credentialsRef: database-credentials
+  googleApi:
+    keysRef: google-api-keys
 
 # Health checks
 healthcheck:

@@ -59,8 +59,32 @@ variable "postgres_gateway_password" {
   sensitive   = true
 }
 
+variable "mongodb_url" {
+  description = "MongoDB connection URL (MongoDB Atlas or other cloud provider)"
+  type        = string
+  sensitive   = true
+}
+
+variable "mongodb_database" {
+  description = "MongoDB database name"
+  type        = string
+  default     = "munshi"
+}
+
+variable "mongodb_username" {
+  description = "MongoDB username"
+  type        = string
+  sensitive   = true
+}
+
 variable "mongodb_password" {
   description = "MongoDB password"
+  type        = string
+  sensitive   = true
+}
+
+variable "google_api_key" {
+  description = "Google API key for Gemini LLM service"
   type        = string
   sensitive   = true
 }
@@ -177,4 +201,10 @@ variable "machine_type" {
   description = "Machine type for GKE cluster nodes"
   type        = string
   default     = "e2-medium"
+}
+
+variable "enable_memory_intensive_pool" {
+  description = "Enable memory-intensive node pool for LLM and ASR services"
+  type        = bool
+  default     = true
 }

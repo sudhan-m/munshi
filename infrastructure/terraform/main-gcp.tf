@@ -1,4 +1,4 @@
-# Terraform configuration for Munshi microservices infrastructure on GCP
+# Terraform configuration for Munshi pronunciation profiling platform on GCP
 terraform {
   required_version = ">= 1.0"
   required_providers {
@@ -14,6 +14,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.10"
     }
+    mongodbatlas = {
+      source  = "mongodb/mongodbatlas"
+      version = "~> 1.14"
+    }
   }
 }
 
@@ -25,7 +29,7 @@ provider "google" {
   # Use gcloud credentials
 }
 
-# Create GKE cluster
+# Create GKE cluster optimized for pronunciation profiling workloads
 resource "google_container_cluster" "cluster" {
   name     = var.cluster_name
   location = var.zone
@@ -41,27 +45,68 @@ resource "google_container_cluster" "cluster" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
-  # Enable network policy
+  # Enable network policy for security
   network_policy {
     enabled = true
   }
 
-  # Enable IP aliasing
+  # Enable IP aliasing for better networking
   ip_allocation_policy {}
+
+  # Enable addons for pronunciation profiling workloads
+  addons_config {
+    horizontal_pod_autoscaling {
+      disabled = false
+    }
+    http_load_balancing {
+      disabled = false
+    }
+    network_policy_config {
+      disabled = false
+    }
+  }
+
+  # Enable binary authorization for security
+  binary_authorization {
+    evaluation_mode = "PROJECT_SINGLETON_POLICY_ENFORCE"
+  }
+
+  # Enable private cluster for security
+  private_cluster_config {
+    enable_private_nodes    = true
+    enable_private_endpoint = false
+    master_ipv4_cidr_block  = "172.16.0.0/28"
+  }
+
+  # Release channel for automatic updates
+  release_channel {
+    channel = var.environment == "production" ? "REGULAR" : "RAPID"
+  }
+
+  # Master auth networks
+  master_authorized_networks_config {
+    cidr_blocks {
+      cidr_block   = "0.0.0.0/0"
+      display_name = "All networks"
+    }
+  }
 }
 
-# Create a separately managed node pool
-resource "google_container_node_pool" "cluster_nodes" {
-  name       = "${var.cluster_name}-node-pool"
+# General purpose node pool for most services
+resource "google_container_node_pool" "general_nodes" {
+  name       = "${var.cluster_name}-general-pool"
   location   = var.zone
   cluster    = google_container_cluster.cluster.name
-  node_count = var.node_count
+  
+  autoscaling {
+    min_node_count = var.environment == "production" ? 2 : 1
+    max_node_count = var.environment == "production" ? 10 : 5
+  }
 
   node_config {
-    spot         = var.environment != "production"  # Use spot instances for max cost savings (newer than preemptible)
+    spot         = var.environment != "production"
     machine_type = var.machine_type
 
-    # Google recommends custom service accounts that have cloud-platform scope and permissions granted via IAM Roles.
     service_account = google_service_account.cluster_service_account.email
     oauth_scopes    = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -71,21 +116,76 @@ resource "google_container_node_pool" "cluster_nodes" {
       disable-legacy-endpoints = "true"
     }
 
-    # Cost optimization: smaller disk
-    disk_size_gb = var.environment != "production" ? 20 : 100
-    disk_type    = "pd-standard"  # Use standard disks instead of SSD
+    disk_size_gb = var.environment != "production" ? 30 : 100
+    disk_type    = "pd-standard"
 
-    # Cost optimization: enable autorepair but not autoupgrade for spot instances
     labels = {
-      environment = var.environment
-      cost-optimized = "true"
+      environment    = var.environment
+      node-pool-type = "general"
+    }
+
+    # Enable secure boot and integrity monitoring
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+}
+
+# High-memory node pool for LLM and ASR services
+resource "google_container_node_pool" "memory_intensive_nodes" {
+  count      = var.enable_memory_intensive_pool ? 1 : 0
+  name       = "${var.cluster_name}-memory-pool"
+  location   = var.zone
+  cluster    = google_container_cluster.cluster.name
+  
+  autoscaling {
+    min_node_count = 0
+    max_node_count = var.environment == "production" ? 3 : 2
+  }
+
+  node_config {
+    spot         = var.environment != "production"
+    machine_type = "e2-highmem-4"  # 4 vCPUs, 32GB RAM for LLM processing
+
+    service_account = google_service_account.cluster_service_account.email
+    oauth_scopes    = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+
+    metadata = {
+      disable-legacy-endpoints = "true"
+    }
+
+    disk_size_gb = 50
+    disk_type    = "pd-ssd"  # Faster storage for model loading
+
+    labels = {
+      environment    = var.environment
+      node-pool-type = "memory-intensive"
+      workload-type  = "llm-asr"
     }
 
     taint {
-      key    = "cloud.google.com/gke-spot"
-      value  = "true"
+      key    = "workload-type"
+      value  = "memory-intensive"
       effect = "NO_SCHEDULE"
     }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
   }
 }
 
@@ -164,14 +264,31 @@ resource "kubernetes_secret" "postgres_gateway" {
   type = "Opaque"
 }
 
-resource "kubernetes_secret" "mongodb" {
+resource "kubernetes_secret" "database_credentials" {
   metadata {
-    name      = "mongodb-secret"
+    name      = "database-credentials"
     namespace = kubernetes_namespace.munshi.metadata[0].name
   }
 
   data = {
-    password = var.mongodb_password
+    mongodb_url      = var.mongodb_url
+    mongodb_database = var.mongodb_database
+    mongodb_username = var.mongodb_username
+    mongodb_password = var.mongodb_password
+  }
+
+  type = "Opaque"
+}
+
+# Secret for Google API keys (LLM service)
+resource "kubernetes_secret" "google_api_keys" {
+  metadata {
+    name      = "google-api-keys"
+    namespace = kubernetes_namespace.munshi.metadata[0].name
+  }
+
+  data = {
+    google_api_key = var.google_api_key
   }
 
   type = "Opaque"
@@ -211,6 +328,32 @@ resource "google_sql_database_instance" "postgres" {
   deletion_protection = var.environment == "production"
 }
 
+# Google Artifact Registry for container images
+resource "google_artifact_registry_repository" "munshi_containers" {
+  location      = var.region
+  repository_id = "munshi-containers"
+  description   = "Container repository for Munshi pronunciation profiling platform"
+  format        = "DOCKER"
+
+  cleanup_policies {
+    id     = "delete-old-images"
+    action = "DELETE"
+    condition {
+      tag_state    = "UNTAGGED"
+      older_than   = "2592000s"  # 30 days
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-recent-tagged"
+    action = "KEEP"
+    most_recent_versions {
+      package_name_prefixes = ["munshi-"]
+      keep_count           = 10
+    }
+  }
+}
+
 # Google Cloud Storage bucket for audio files
 resource "google_storage_bucket" "audio_storage" {
   name          = "${var.project_id}-munshi-audio"
@@ -221,6 +364,14 @@ resource "google_storage_bucket" "audio_storage" {
 
   versioning {
     enabled = true
+  }
+
+  # CORS for browser audio uploads
+  cors {
+    origin          = ["*"]
+    method          = ["GET", "HEAD", "PUT", "POST", "DELETE"]
+    response_header = ["*"]
+    max_age_seconds = 3600
   }
 
   lifecycle_rule {
@@ -243,6 +394,30 @@ resource "google_storage_bucket" "audio_storage" {
   }
 }
 
+# Google Cloud Storage bucket for model artifacts (Whisper models, etc.)
+resource "google_storage_bucket" "model_storage" {
+  name          = "${var.project_id}-munshi-models"
+  location      = var.region
+  force_destroy = var.environment != "production"
+
+  uniform_bucket_level_access = true
+
+  versioning {
+    enabled = true
+  }
+
+  # Models are read-heavy, optimize for that
+  lifecycle_rule {
+    condition {
+      age = 180  # Keep models longer
+    }
+    action {
+      type          = "SetStorageClass"
+      storage_class = "NEARLINE"
+    }
+  }
+}
+
 # IAM service account for workload identity
 resource "google_service_account" "munshi_workload" {
   account_id   = "munshi-workload"
@@ -254,6 +429,20 @@ resource "google_storage_bucket_iam_member" "audio_storage_access" {
   bucket = google_storage_bucket.audio_storage.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.munshi_workload.email}"
+}
+
+resource "google_storage_bucket_iam_member" "model_storage_access" {
+  bucket = google_storage_bucket.model_storage.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.munshi_workload.email}"
+}
+
+# Grant Artifact Registry access for pulling images
+resource "google_artifact_registry_repository_iam_member" "container_access" {
+  location   = google_artifact_registry_repository.munshi_containers.location
+  repository = google_artifact_registry_repository.munshi_containers.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.cluster_service_account.email}"
 }
 
 # Kubernetes service account
@@ -346,6 +535,50 @@ resource "kubernetes_resource_quota" "munshi_quota" {
       "limits.cpu"      = var.total_cpu_limits
       "limits.memory"   = var.total_memory_limits
       "pods"           = var.max_pods
+      "secrets"        = "50"
+      "configmaps"     = "50"
     }
   }
+}
+
+# Outputs for deployment information
+output "cluster_name" {
+  description = "GKE cluster name"
+  value       = google_container_cluster.cluster.name
+}
+
+output "cluster_endpoint" {
+  description = "GKE cluster endpoint"
+  value       = google_container_cluster.cluster.endpoint
+  sensitive   = true
+}
+
+output "cluster_location" {
+  description = "GKE cluster location"
+  value       = google_container_cluster.cluster.location
+}
+
+output "artifact_registry_repository" {
+  description = "Artifact Registry repository URL"
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.munshi_containers.repository_id}"
+}
+
+output "audio_storage_bucket" {
+  description = "Audio storage bucket name"
+  value       = google_storage_bucket.audio_storage.name
+}
+
+output "model_storage_bucket" {
+  description = "Model storage bucket name"
+  value       = google_storage_bucket.model_storage.name
+}
+
+output "namespace" {
+  description = "Kubernetes namespace"
+  value       = kubernetes_namespace.munshi.metadata[0].name
+}
+
+output "workload_identity_service_account" {
+  description = "Workload Identity service account email"
+  value       = google_service_account.munshi_workload.email
 }

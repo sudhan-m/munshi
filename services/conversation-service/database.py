@@ -40,3 +40,7 @@ def get_users_collection():
 def get_sessions_collection():
     """Get sessions collection."""
     return database.sessions
+
+def get_pronunciation_profiles_collection():
+    """Get pronunciation profiles collection."""
+    return database.pronunciation_profiles

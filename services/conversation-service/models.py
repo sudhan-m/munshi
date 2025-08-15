@@ -124,3 +124,34 @@ class ConversationSession(BaseModel):
     last_activity: datetime = Field(default_factory=datetime.utcnow)
     language: str = "English"
     session_type: str = "chat"
+
+class PronunciationProfile(BaseModel):
+    """
+    Model for user pronunciation profile using Thompson Sampling bandits.
+    
+    Attributes:
+        user_id: User identifier
+        language: Language for this profile
+        phoneme_confidences: Mapping of phonemes to confidence scores
+        weakness_bandit_state: State of weakness bandit (alpha, beta values)
+        strength_bandit_state: State of strength bandit (alpha, beta values)
+        recent_attempts: Recent pronunciation attempts
+        session_history: Historical session data
+        metadata: Profile metadata including accuracy and compaction info
+        created_at: Profile creation timestamp
+        last_updated: Last update timestamp
+    """
+    user_id: str
+    language: str
+    phoneme_confidences: Dict[str, Dict[str, Any]] = {}
+    weakness_bandit_state: Dict[str, Dict[str, int]] = {}
+    strength_bandit_state: Dict[str, Dict[str, int]] = {}
+    recent_attempts: List[Dict[str, Any]] = []
+    session_history: List[Dict[str, Any]] = []
+    metadata: Dict[str, Any] = {
+        "total_attempts": 0,
+        "overall_accuracy": 0.0,
+        "last_compaction": None
+    }
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=datetime.utcnow)

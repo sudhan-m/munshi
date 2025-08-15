@@ -19,7 +19,8 @@ from models import (
     ConversationRequest, ConversationResponse,
     TransliterationRequest, TransliterationResponse,
     SentenceGenerationRequest, SentenceGenerationResponse,
-    ResponseGenerationRequest, ResponseGenerationResponse
+    ResponseGenerationRequest, ResponseGenerationResponse,
+    BanditStrategyRequest, BanditStrategyResponse
 )
 
 app = FastAPI(
@@ -124,10 +125,35 @@ Manglish:"""
             print(f"Transliteration error: {e}")
             return text
     
-    async def generate_practice_sentence(self, language: str, difficulty: str = "beginner", topic: Optional[str] = None) -> dict:
-        """Generate practice sentence for pronunciation"""
+    async def generate_practice_sentence(
+        self, 
+        language: str, 
+        difficulty: str = "beginner", 
+        topic: Optional[str] = None,
+        target_phonemes: Optional[List[str]] = None,
+        pronunciation_profile: Optional[dict] = None
+    ) -> dict:
+        """Generate practice sentence for pronunciation with profiling support"""
         
         topic_context = f" related to {topic}" if topic else ""
+        
+        # Build phoneme context
+        phoneme_context = ""
+        if target_phonemes:
+            phoneme_list = ", ".join(target_phonemes)
+            phoneme_context = f"\n\nIMPORTANT: Include words with these target sounds/phonemes: {phoneme_list}"
+        
+        # Build user context
+        user_context = ""
+        if pronunciation_profile:
+            overall_acc = pronunciation_profile.get("overall_accuracy", 0.5)
+            recent_acc = pronunciation_profile.get("recent_accuracy", 0.5)
+            user_context = f"""
+            
+User pronunciation context:
+- Overall accuracy: {overall_acc:.1%}
+- Recent accuracy: {recent_acc:.1%}
+- Adjust sentence complexity accordingly"""
         
         prompt = f"""Generate a {difficulty} level sentence in {language}{topic_context} for pronunciation practice.
 
@@ -135,7 +161,7 @@ Requirements:
 - Appropriate for {difficulty} level learners
 - Clear pronunciation focus
 - Culturally appropriate
-- Single sentence only
+- Single sentence only{phoneme_context}{user_context}
 
 Respond with just the sentence in {language}."""
 
@@ -192,6 +218,20 @@ Be warm, supportive, and specific to their performance."""
             return response.text
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Response generation error: {str(e)}")
+    
+    async def analyze_bandit_strategy(self, prompt: str) -> str:
+        """Analyze user context and recommend bandit strategy"""
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=50,
+                    temperature=0.3,
+                )
+            )
+            return response.text.strip()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Strategy analysis error: {str(e)}")
 
 # Initialize LLM service
 llm_service = LLMService()
@@ -239,12 +279,14 @@ async def transliterate_text(request: TransliterationRequest):
 
 @app.post("/generate-sentence", response_model=SentenceGenerationResponse)
 async def generate_practice_sentence(request: SentenceGenerationRequest):
-    """Generate practice sentence for pronunciation."""
+    """Generate practice sentence for pronunciation with profiling support."""
     try:
         sentence_data = await llm_service.generate_practice_sentence(
             request.language,
             request.difficulty,
-            request.topic
+            request.topic,
+            request.target_phonemes,
+            request.pronunciation_profile
         )
         return SentenceGenerationResponse(success=True, sentence_data=sentence_data)
     except Exception as e:
@@ -262,6 +304,15 @@ async def generate_evaluation_response(request: ResponseGenerationRequest):
         return ResponseGenerationResponse(success=True, response=response_text)
     except Exception as e:
         return ResponseGenerationResponse(success=False, error=str(e))
+
+@app.post("/analyze-strategy", response_model=BanditStrategyResponse)
+async def analyze_bandit_strategy(request: BanditStrategyRequest):
+    """Analyze user context and recommend bandit strategy."""
+    try:
+        strategy_text = await llm_service.analyze_bandit_strategy(request.prompt)
+        return BanditStrategyResponse(success=True, strategy=strategy_text)
+    except Exception as e:
+        return BanditStrategyResponse(success=False, error=str(e))
 
 if __name__ == "__main__":
     uvicorn.run(

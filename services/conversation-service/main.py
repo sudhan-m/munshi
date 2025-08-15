@@ -17,12 +17,13 @@ import httpx
 import uvicorn
 from datetime import datetime, timedelta
 
-from database import connect_to_mongo, close_mongo_connection, get_conversations_collection, get_users_collection
+from database import connect_to_mongo, close_mongo_connection, get_conversations_collection, get_users_collection, get_pronunciation_profiles_collection
 from models import (
     ChatMessage, ConversationRequest, ConversationResponse,
     PronunciationEvaluationRequest, PronunciationEvaluationResponse,
-    UserProfile, ConversationSession
+    UserProfile, ConversationSession, PronunciationProfile
 )
+from pronunciation_profiler import PronunciationProfileManager
 
 app = FastAPI(
     title="Munshi Conversation Service",
@@ -50,9 +51,11 @@ class ConversationOrchestrator:
     
     def __init__(self):
         self.http_client = httpx.AsyncClient(timeout=30.0)
+        self.pronunciation_manager = PronunciationProfileManager(LLM_SERVICE_URL)
     
     async def close(self):
         await self.http_client.aclose()
+        await self.pronunciation_manager.close()
     
     async def get_or_create_user_profile(self, user_id: str) -> Dict[str, Any]:
         """Get or create user learning profile"""
@@ -77,6 +80,121 @@ class ConversationOrchestrator:
         
         await collection.insert_one(new_user)
         return new_user
+    
+    async def get_or_create_pronunciation_profile(self, user_id: str, language: str) -> Dict[str, Any]:
+        """Get or create pronunciation profile for user and language"""
+        collection = get_pronunciation_profiles_collection()
+        
+        profile = await collection.find_one({"user_id": user_id, "language": language})
+        if profile:
+            # Convert MongoDB document to dict and remove _id
+            profile.pop("_id", None)
+            # Reconstruct bandits from stored state
+            profile = self._reconstruct_profile_bandits(profile)
+            return profile
+        
+        # Create new pronunciation profile
+        new_profile = self.pronunciation_manager.create_profile(user_id, language)
+        
+        # Serialize for MongoDB storage
+        serialized_profile = self._serialize_profile_for_storage(new_profile)
+        await collection.insert_one(serialized_profile)
+        
+        return new_profile
+    
+    async def save_pronunciation_profile(self, profile: Dict[str, Any]):
+        """Save pronunciation profile to database"""
+        collection = get_pronunciation_profiles_collection()
+        
+        # Serialize for storage
+        serialized_profile = self._serialize_profile_for_storage(profile)
+        
+        await collection.update_one(
+            {"user_id": profile["user_id"], "language": profile["language"]},
+            {"$set": serialized_profile},
+            upsert=True
+        )
+    
+    def _serialize_profile_for_storage(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert profile with bandits to MongoDB-serializable format"""
+        serialized = profile.copy()
+        
+        # Convert bandit objects to serializable state
+        if "weakness_bandit" in profile:
+            bandit = profile["weakness_bandit"]
+            serialized["weakness_bandit_state"] = {
+                phoneme: {
+                    "successes": conf.successes,
+                    "failures": conf.failures,
+                    "attempts": conf.attempts,
+                    "last_updated": conf.last_updated.isoformat() if conf.last_updated else None
+                }
+                for phoneme, conf in bandit.confidences.items()
+            }
+            del serialized["weakness_bandit"]
+        
+        if "strength_bandit" in profile:
+            bandit = profile["strength_bandit"]
+            serialized["strength_bandit_state"] = {
+                phoneme: {
+                    "successes": conf.successes,
+                    "failures": conf.failures,
+                    "attempts": conf.attempts,
+                    "last_updated": conf.last_updated.isoformat() if conf.last_updated else None
+                }
+                for phoneme, conf in bandit.confidences.items()
+            }
+            del serialized["strength_bandit"]
+        
+        # Convert datetime objects to ISO strings
+        if "created_at" in serialized:
+            serialized["created_at"] = serialized["created_at"].isoformat()
+        if "last_updated" in serialized:
+            serialized["last_updated"] = serialized["last_updated"].isoformat()
+        
+        return serialized
+    
+    def _reconstruct_profile_bandits(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Reconstruct bandit objects from stored state"""
+        from pronunciation_profiler import ThompsonSamplingBandit, PhonemeConfidence
+        from phoneme_mappings import LANGUAGE_PHONEMES
+        
+        language = profile["language"]
+        phonemes = LANGUAGE_PHONEMES.get(language, [])
+        
+        # Reconstruct weakness bandit
+        weakness_bandit = ThompsonSamplingBandit(phonemes)
+        if "weakness_bandit_state" in profile:
+            for phoneme, state in profile["weakness_bandit_state"].items():
+                if phoneme in weakness_bandit.confidences:
+                    conf = weakness_bandit.confidences[phoneme]
+                    conf.successes = state.get("successes", 1)
+                    conf.failures = state.get("failures", 1)
+                    conf.attempts = state.get("attempts", 0)
+                    if state.get("last_updated"):
+                        conf.last_updated = datetime.fromisoformat(state["last_updated"])
+        profile["weakness_bandit"] = weakness_bandit
+        
+        # Reconstruct strength bandit
+        strength_bandit = ThompsonSamplingBandit(phonemes)
+        if "strength_bandit_state" in profile:
+            for phoneme, state in profile["strength_bandit_state"].items():
+                if phoneme in strength_bandit.confidences:
+                    conf = strength_bandit.confidences[phoneme]
+                    conf.successes = state.get("successes", 1)
+                    conf.failures = state.get("failures", 1)
+                    conf.attempts = state.get("attempts", 0)
+                    if state.get("last_updated"):
+                        conf.last_updated = datetime.fromisoformat(state["last_updated"])
+        profile["strength_bandit"] = strength_bandit
+        
+        # Convert datetime strings back to datetime objects
+        if isinstance(profile.get("created_at"), str):
+            profile["created_at"] = datetime.fromisoformat(profile["created_at"])
+        if isinstance(profile.get("last_updated"), str):
+            profile["last_updated"] = datetime.fromisoformat(profile["last_updated"])
+        
+        return profile
     
     async def get_conversation_context(self, user_id: str, limit: int = 10) -> List[Dict[str, str]]:
         """Get recent conversation context for user"""
@@ -162,8 +280,17 @@ class ConversationOrchestrator:
         intended_text: str, 
         language: str
     ) -> Dict[str, Any]:
-        """Handle pronunciation evaluation workflow"""
+        """Handle pronunciation evaluation workflow with profiling integration"""
         try:
+            # Get or create pronunciation profile
+            pronunciation_profile = await self.get_or_create_pronunciation_profile(user_id, language)
+            
+            # Get conversation context for mood detection
+            conversation_context = await self.get_conversation_context(user_id, limit=5)
+            context_text = " ".join([
+                f"{msg.get('user', '')} {msg.get('assistant', '')}" 
+                for msg in conversation_context
+            ])
             # Step 1: Get transcription from ASR service
             audio_response = await self.http_client.get(f"{AUDIO_SERVICE_URL}/audio/play/{audio_file_id}")
             if audio_response.status_code != 200:
@@ -273,7 +400,26 @@ class ConversationOrchestrator:
                 }
             )
             
-            # Step 7: Save evaluation to conversation history
+            # Step 7: Update pronunciation profile with evaluation results
+            character_errors = eval_result["results"].get("character_mispronunciations", [])
+            updated_profile = self.pronunciation_manager.update_profile_with_evaluation(
+                pronunciation_profile,
+                character_errors,
+                accuracy,
+                intended_text,
+                actual_transcription,
+                language
+            )
+            
+            # Save updated profile to database
+            await self.save_pronunciation_profile(updated_profile)
+            
+            # Check if profile needs compaction
+            if await self.pronunciation_manager.should_compact_profile(updated_profile):
+                compacted_profile = await self.pronunciation_manager.compact_profile_with_llm(updated_profile)
+                await self.save_pronunciation_profile(compacted_profile)
+            
+            # Step 8: Save evaluation to conversation history
             await self.save_conversation_message(
                 user_id, 
                 "evaluation", 
@@ -281,7 +427,8 @@ class ConversationOrchestrator:
                 {
                     "evaluation_results": eval_result["results"],
                     "intended_text": intended_text,
-                    "language": language
+                    "language": language,
+                    "character_errors": character_errors
                 }
             )
             
@@ -301,7 +448,13 @@ class ConversationOrchestrator:
             return {
                 "success": True,
                 "evaluation_results": eval_result["results"],
-                "llm_response": llm_response_text
+                "llm_response": llm_response_text,
+                "pronunciation_insights": {
+                    "target_phonemes": await self.pronunciation_manager.suggest_target_phonemes(
+                        updated_profile, context_text, count=3
+                    ),
+                    "overall_accuracy": updated_profile["metadata"]["overall_accuracy"]
+                }
             }
             
         except Exception as e:
@@ -431,14 +584,34 @@ async def get_user_conversations(user_id: str, limit: int = 20):
 
 @app.post("/user/{user_id}/generate-sentence")
 async def generate_practice_sentence(user_id: str, language: str, difficulty: str = "beginner", topic: str = None):
-    """Generate practice sentence for user."""
+    """Generate practice sentence for user with pronunciation profiling."""
     try:
+        # Get pronunciation profile and conversation context
+        pronunciation_profile = await orchestrator.get_or_create_pronunciation_profile(user_id, language)
+        conversation_context = await orchestrator.get_conversation_context(user_id, limit=5)
+        context_text = " ".join([
+            f"{msg.get('user', '')} {msg.get('assistant', '')}" 
+            for msg in conversation_context
+        ])
+        
+        # Get target phonemes based on bandit strategy
+        target_phonemes = await orchestrator.pronunciation_manager.suggest_target_phonemes(
+            pronunciation_profile, context_text, count=5
+        )
+        
         response = await orchestrator.http_client.post(
             f"{LLM_SERVICE_URL}/generate-sentence",
             json={
                 "language": language,
                 "difficulty": difficulty,
-                "topic": topic
+                "topic": topic,
+                "target_phonemes": target_phonemes,
+                "pronunciation_profile": {
+                    "overall_accuracy": pronunciation_profile["metadata"]["overall_accuracy"],
+                    "recent_accuracy": orchestrator.pronunciation_manager._calculate_recent_accuracy(
+                        pronunciation_profile.get("recent_attempts", [])
+                    )
+                }
             }
         )
         
@@ -462,6 +635,52 @@ async def generate_practice_sentence(user_id: str, language: str, difficulty: st
         raise HTTPException(
             status_code=500,
             detail=f"Error generating sentence: {str(e)}"
+        )
+
+@app.get("/user/{user_id}/pronunciation-profile/{language}")
+async def get_pronunciation_profile(user_id: str, language: str):
+    """Get user's pronunciation profile insights."""
+    try:
+        pronunciation_profile = await orchestrator.get_or_create_pronunciation_profile(user_id, language)
+        
+        # Get conversation context for recommendations
+        conversation_context = await orchestrator.get_conversation_context(user_id, limit=5)
+        context_text = " ".join([
+            f"{msg.get('user', '')} {msg.get('assistant', '')}" 
+            for msg in conversation_context
+        ])
+        
+        # Get recommendations
+        target_phonemes = await orchestrator.pronunciation_manager.suggest_target_phonemes(
+            pronunciation_profile, context_text, count=5
+        )
+        
+        # Get weak and strong phonemes for insights
+        weakness_bandit = pronunciation_profile["weakness_bandit"]
+        strength_bandit = pronunciation_profile["strength_bandit"]
+        
+        weak_phonemes = weakness_bandit.get_phoneme_ranking(ascending=True)[:5]
+        strong_phonemes = strength_bandit.get_phoneme_ranking(ascending=False)[:5]
+        
+        return {
+            "user_id": user_id,
+            "language": language,
+            "overall_accuracy": pronunciation_profile["metadata"]["overall_accuracy"],
+            "total_attempts": pronunciation_profile["metadata"]["total_attempts"],
+            "recent_accuracy": orchestrator.pronunciation_manager._calculate_recent_accuracy(
+                pronunciation_profile.get("recent_attempts", [])
+            ),
+            "recommended_phonemes": target_phonemes,
+            "weakest_phonemes": [{"phoneme": p, "confidence": c} for p, c in weak_phonemes],
+            "strongest_phonemes": [{"phoneme": p, "confidence": c} for p, c in strong_phonemes],
+            "session_duration_minutes": orchestrator.pronunciation_manager._get_session_duration(pronunciation_profile),
+            "last_updated": pronunciation_profile["last_updated"].isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching pronunciation profile: {str(e)}"
         )
 
 if __name__ == "__main__":

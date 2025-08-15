@@ -78,7 +78,10 @@
       "Bash(kubectl cp:*)",
       "Bash(/Users/sudhan/Documents/munshi/test-asr-fallback-quick.sh)",
       "Bash(helm template:*)",
-      "Bash(GOOGLE_API_KEY=\"AIzaSyAdRWlckbMxq5-EayjY3OAn-PVt4EOTLf4\" python -c \"\nimport sys\nimport os\nsys.path.append(''.'')\nprint(f''Testing Gemini integration...'')\nprint(f''API Key set: {bool(os.getenv(\"\"GOOGLE_API_KEY\"\"))}'')\n\ntry:\n    from main import llm_service, GOOGLE_API_KEY\n    print(f''✅ Google API Key configured: {bool(GOOGLE_API_KEY)}'')\n    print(f''✅ LLM Service initialized successfully'')\n    print(''🎉 Gemini integration test passed!'')\nexcept Exception as e:\n    print(f''❌ Error: {e}'')\n    import traceback\n    traceback.print_exc()\n    sys.exit(1)\n\")"
+      "Bash(GOOGLE_API_KEY=\"AIzaSyAdRWlckbMxq5-EayjY3OAn-PVt4EOTLf4\" python -c \"\nimport sys\nimport os\nsys.path.append(''.'')\nprint(f''Testing Gemini integration...'')\nprint(f''API Key set: {bool(os.getenv(\"\"GOOGLE_API_KEY\"\"))}'')\n\ntry:\n    from main import llm_service, GOOGLE_API_KEY\n    print(f''✅ Google API Key configured: {bool(GOOGLE_API_KEY)}'')\n    print(f''✅ LLM Service initialized successfully'')\n    print(''🎉 Gemini integration test passed!'')\nexcept Exception as e:\n    print(f''❌ Error: {e}'')\n    import traceback\n    traceback.print_exc()\n    sys.exit(1)\n\")",
+      "Bash(gcloud components install:*)",
+      "Bash(gcloud container clusters get-credentials:*)",
+      "Bash(gcloud container clusters:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

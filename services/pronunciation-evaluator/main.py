@@ -48,56 +48,44 @@ class PronunciationEvaluator:
         return text.lower()
     
     @staticmethod
-    def analyze_pronunciation_errors(
-        intended_words: List[str], 
-        actual_words: List[str],
-        intended_romanized: List[str],
-        actual_romanized: List[str]
+    def analyze_character_mispronunciations(
+        intended_romanized: str,
+        actual_romanized: str
     ) -> List[Dict[str, Any]]:
-        """Analyze word-level pronunciation errors"""
-        sm = difflib.SequenceMatcher(None, intended_words, actual_words)
+        """Analyze character-level pronunciation errors"""
+        # Remove spaces for character comparison
+        intended_chars = ''.join(intended_romanized.split())
+        actual_chars = ''.join(actual_romanized.split())
+        
+        sm = difflib.SequenceMatcher(None, intended_chars, actual_chars)
         errors = []
         
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag == 'replace':
-                for idx in range(max(i2-i1, j2-j1)):
-                    expected_word = intended_words[i1 + idx] if (i1 + idx) < i2 else ""
-                    actual_word = actual_words[j1 + idx] if (j1 + idx) < j2 else ""
-                    expected_roman = intended_romanized[i1 + idx] if (i1 + idx) < len(intended_romanized) and (i1 + idx) < i2 else ""
-                    actual_roman = actual_romanized[j1 + idx] if (j1 + idx) < len(actual_romanized) and (j1 + idx) < j2 else ""
-                    
-                    if expected_word and actual_word and expected_word != actual_word:
-                        errors.append({
-                            "type": "mispronounced",
-                            "expected_word": expected_word,
-                            "expected_romanized": expected_roman,
-                            "actual_word": actual_word,
-                            "actual_romanized": actual_roman
-                        })
-            
+                expected_char = intended_chars[i1:i2]
+                actual_char = actual_chars[j1:j2]
+                errors.append({
+                    "type": "mispronounced_character",
+                    "expected": expected_char,
+                    "actual": actual_char,
+                    "position": i1
+                })
             elif tag == 'delete':
-                for idx in range(i2-i1):
-                    expected_word = intended_words[i1 + idx]
-                    expected_roman = intended_romanized[i1 + idx] if (i1 + idx) < len(intended_romanized) else ""
-                    errors.append({
-                        "type": "missing",
-                        "expected_word": expected_word,
-                        "expected_romanized": expected_roman,
-                        "actual_word": "(Not spoken)",
-                        "actual_romanized": ""
-                    })
-            
+                missing_char = intended_chars[i1:i2]
+                errors.append({
+                    "type": "missing_character",
+                    "expected": missing_char,
+                    "actual": "",
+                    "position": i1
+                })
             elif tag == 'insert':
-                for idx in range(j2-j1):
-                    actual_word = actual_words[j1 + idx]
-                    actual_roman = actual_romanized[j1 + idx] if (j1 + idx) < len(actual_romanized) else ""
-                    errors.append({
-                        "type": "extra",
-                        "expected_word": "(Not expected)",
-                        "expected_romanized": "",
-                        "actual_word": actual_word,
-                        "actual_romanized": actual_roman
-                    })
+                extra_char = actual_chars[j1:j2]
+                errors.append({
+                    "type": "extra_character",
+                    "expected": "",
+                    "actual": extra_char,
+                    "position": i1
+                })
         
         return errors
     
@@ -107,19 +95,6 @@ class PronunciationEvaluator:
         sm = difflib.SequenceMatcher(None, intended_words, actual_words)
         return sm.ratio() * 100
     
-    @staticmethod
-    def get_feedback_message(accuracy: float) -> str:
-        """Generate motivational feedback message"""
-        if accuracy >= 95:
-            return "🎉 Outstanding! Perfect pronunciation!"
-        elif accuracy >= 85:
-            return "🌟 Excellent! Very natural sounding!"
-        elif accuracy >= 70:
-            return "👍 Good job! Your pronunciation is improving!"
-        elif accuracy >= 50:
-            return "📚 Getting there! Focus on the highlighted sounds!"
-        else:
-            return "💪 Keep practicing! Every attempt makes you better!"
     
     def evaluate_pronunciation(
         self,
@@ -161,14 +136,10 @@ class PronunciationEvaluator:
                 wer_val = 0.0
                 cer_val = 0.0
             
-            # Analyze errors
-            pronunciation_errors = self.analyze_pronunciation_errors(
-                intended_words, actual_words,
-                intended_romanized_words, actual_romanized_words
+            # Analyze character-level pronunciation errors
+            character_errors = self.analyze_character_mispronunciations(
+                intended_romanized, actual_romanized
             )
-            
-            # Generate feedback
-            feedback_message = self.get_feedback_message(accuracy)
             
             results = {
                 "success": True,
@@ -187,15 +158,12 @@ class PronunciationEvaluator:
                         "word_error_rate": round(wer_val * 100, 1),
                         "character_error_rate": round(cer_val * 100, 1)
                     },
-                    "pronunciation_errors": pronunciation_errors,
-                    "feedback": {
-                        "message": feedback_message,
-                        "total_errors": len(pronunciation_errors)
-                    },
+                    "character_mispronunciations": character_errors,
                     "metadata": {
                         "language": language,
                         "total_words_expected": len(intended_words),
-                        "total_words_spoken": len(actual_words)
+                        "total_words_spoken": len(actual_words),
+                        "total_character_errors": len(character_errors)
                     }
                 }
             }

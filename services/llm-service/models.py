@@ -67,10 +67,14 @@ class SentenceGenerationRequest(BaseModel):
         language: Target language for sentence
         difficulty: Difficulty level (beginner, intermediate, advanced)
         topic: Optional topic focus
+        target_phonemes: Phonemes to focus on based on pronunciation profiling
+        pronunciation_profile: User's pronunciation profile context
     """
     language: str
     difficulty: str = "beginner"
     topic: Optional[str] = None
+    target_phonemes: Optional[List[str]] = None
+    pronunciation_profile: Optional[Dict[str, Any]] = None
 
 class SentenceGenerationResponse(BaseModel):
     """
@@ -109,4 +113,26 @@ class ResponseGenerationResponse(BaseModel):
     """
     success: bool
     response: Optional[str] = None
+    error: Optional[str] = None
+
+class BanditStrategyRequest(BaseModel):
+    """
+    Request model for bandit strategy analysis.
+    
+    Attributes:
+        prompt: Analysis prompt for LLM
+    """
+    prompt: str
+
+class BanditStrategyResponse(BaseModel):
+    """
+    Response model for bandit strategy analysis.
+    
+    Attributes:
+        success: Whether analysis was successful
+        strategy: Recommended strategy (CHALLENGE or ENCOURAGE)
+        error: Error message if analysis failed
+    """
+    success: bool
+    strategy: Optional[str] = None
     error: Optional[str] = None

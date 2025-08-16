@@ -44,24 +44,24 @@ docker-compose up -d
 
 ## Architecture Overview
 
-### Linkerd Service Mesh Architecture (Recommended)
+### Service Mesh Architecture (Recommended)
 ```
-Internet → Caddy Ingress → API Gateway → Auth Service
-           + Linkerd       + Linkerd      + Linkerd
-                ↓              ↓             ↓
-        Automatic mTLS    Observability  Service Identity
-        Traffic Management Load Balancing Circuit Breaking
+Internet → NGINX Ingress → Conversation Service → AI Services (ASR, LLM, Evaluator)
+           + Service Mesh   + Service Mesh      + Service Mesh
+                ↓              ↓                     ↓
+        Automatic mTLS    Observability        Service Identity
+        Traffic Management Load Balancing     Circuit Breaking
         Distributed Tracing Retries & Timeouts Security
 ```
 
 ### Traditional Architecture
 ```
-Internet → Caddy Reverse Proxy (HTTPS) → API Gateway → Auth Service (Manual mTLS)
-                ↓                              ↓              ↓
-        TLS Termination                Redis Cache     Redis Cache
-        Request Tracing              Rate Limiting    Token Blacklist
-        Response Compression         Response Cache   Session Management
-        Emergency DDoS Protection    Circuit Breaker  Failed Login Track
+Internet → NGINX Reverse Proxy (HTTPS) → Conversation Service → AI Services
+                ↓                              ↓                    ↓
+        TLS Termination                MongoDB Cache        Model Caching
+        Request Tracing              Rate Limiting         GPU Optimization
+        Response Compression         Session Management    Performance Tuning
+        Emergency DDoS Protection    Circuit Breaker       Error Handling
 ```
 
 ## Redis Cache Requirements
@@ -81,16 +81,16 @@ The Munshi architecture requires two separate Redis instances for optimal perfor
   - Failed login attempt tracking (15-minute sliding window)
   - Account lockout management (15-minute TTL)
 
-#### **API Gateway Redis (Database 0)**
+#### **Application Cache Redis (Database 0)**
 - **Port**: 6381 (development) / 6379 (production with network isolation)
 - **Database**: 0
 - **Memory Requirements**: 512MB minimum, 1GB recommended
-- **Persistence**: RDB + AOF for rate limiting data integrity
+- **Persistence**: RDB + AOF for data integrity
 - **Features**:
-  - Sliding window rate limiting (Redis sorted sets)
-  - Response caching (5-10 minute TTL)
-  - Service discovery cache (60-second TTL)
-  - Circuit breaker state tracking
+  - ASR model caching (long TTL)
+  - LLM response caching (5-10 minute TTL)
+  - Conversation context caching (1-hour TTL)
+  - Service health status caching
 
 ### **Redis Configuration**
 

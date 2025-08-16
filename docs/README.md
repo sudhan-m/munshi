@@ -21,7 +21,7 @@ Welcome to the Munshi microservices documentation. This directory contains compr
 - Deployment procedures
 - Troubleshooting guides
 
-### 🤝 [Contributing](contributing/)
+### 🤝 [Contributing](../CONTRIBUTING.md)
 - Contribution guidelines
 - Code standards and best practices
 - Development setup instructions
@@ -30,8 +30,14 @@ Welcome to the Munshi microservices documentation. This directory contains compr
 ## 🚀 Quick Links
 
 - **[Main README](../README.md)** - Project overview and quick start
-- **[API Gateway README](../services/api-gateway/README.md)** - Gateway service details
+- **[Service Architecture](architecture/SERVICES.md)** - Detailed service architecture
 - **[Auth Service README](../services/auth-service/README.md)** - Authentication service details
+- **[Conversation Service README](../services/conversation-service/README.md)** - Main orchestrator details
+- **[ASR Service README](../services/asr-service/README.md)** - Speech recognition service details
+- **[LLM Service README](../services/llm-service/README.md)** - Language model service details
+- **[Pronunciation Evaluator README](../services/pronunciation-evaluator/README.md)** - Evaluation service details
+- **[Audio Service README](../services/audio-service/README.md)** - Audio storage service details
+- **[UI Service README](../services/ui-service/README.md)** - Frontend service details
 
 ## 📋 Getting Started
 

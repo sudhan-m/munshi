@@ -20,7 +20,7 @@ services/
 ├── auth-service/
 │   ├── config.json          # Application behavior & business logic
 │   └── config.py            # Configuration loader wrapper
-├── api-gateway/
+├── conversation-service/
 │   ├── config.json          # Application behavior & business logic  
 │   └── config.py            # Configuration loader wrapper
 └── shared/
@@ -62,22 +62,31 @@ services/
 }
 ```
 
-### API Gateway Config (`services/api-gateway/config.json`)
+### Conversation Service Config (`services/conversation-service/config.json`)
 ```json
 {
-  "routing": {
-    "service_discovery": {
-      "enabled": true,
-      "health_check_interval_seconds": 30
+  "service": {
+    "name": "conversation-service",
+    "version": "1.0.0"
+  },
+  "ai_services": {
+    "asr_service": {
+      "timeout_seconds": 30,
+      "retry_attempts": 3
     },
-    "load_balancing": {
-      "strategy": "round_robin",
-      "max_retries": 3
+    "llm_service": {
+      "timeout_seconds": 60,
+      "max_context_tokens": 200000
+    },
+    "evaluator_service": {
+      "timeout_seconds": 10,
+      "min_accuracy_threshold": 0.7
     }
   },
-  "rate_limiting": {
-    "enabled": true,
-    "default_requests_per_minute": 1000
+  "features": {
+    "enable_conversation_history": true,
+    "enable_pronunciation_profiling": true,
+    "max_conversation_length": 50
   }
 }
 ```
@@ -109,7 +118,12 @@ JWT_SECRET_KEY=your-secret-key
 
 # Service URLs
 AUTH_SERVICE_URL=http://localhost:8001
-API_GATEWAY_URL=http://localhost:8000
+CONVERSATION_SERVICE_URL=http://localhost:8007
+ASR_SERVICE_URL=http://localhost:8004
+LLM_SERVICE_URL=http://localhost:8005
+EVALUATOR_SERVICE_URL=http://localhost:8006
+AUDIO_SERVICE_URL=http://localhost:8003
+UI_SERVICE_URL=http://localhost:8002
 
 # Deployment-specific Overrides
 CORS_ORIGINS=["http://localhost:3000"]
@@ -131,7 +145,7 @@ The `ConfigLoader` class in `services/shared/config/config_loader.py` provides:
 from shared.config.config_loader import get_config
 
 # Get configuration loader
-config = get_config("auth-service", "/path/to/service")
+config = get_config("conversation-service", "/path/to/service")
 
 # Load values with environment override
 jwt_secret = config.get("security.jwt.secret_key", "default", "JWT_SECRET_KEY")

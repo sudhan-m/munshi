@@ -1,15 +1,25 @@
-# Munshi UI Service
+# UI Service - Frontend Interface
 
-Modern React-based frontend for Munshi AI voice assistant with clean chat interface, authentication, and real-time audio recording.
+Modern React-based frontend for the Munshi AI language learning platform, providing an intuitive conversational interface for language learning and pronunciation practice.
+
+## 🎯 Overview
+
+The UI Service serves as the primary user interface for the Munshi platform, featuring:
+- **Conversational Chat Interface**: Real-time chat experience with AI
+- **Audio Recording & Playback**: Browser-based audio capture for pronunciation practice
+- **Authentication Integration**: Seamless login and registration flows
+- **Responsive Design**: Mobile-friendly interface with modern animations
+- **Real-time Features**: Typing indicators and smooth interactions
 
 ## ✨ Features
 
-- **🔐 Authentication** - Simple sign up/sign in with JWT tokens
-- **💬 Chat Interface** - Clean conversation UI with text and voice messages  
-- **🎤 Audio Recording** - One-click recording with real-time level visualization
-- **🎵 Audio Playback** - Play messages with power spectrum visualization
-- **📱 Responsive** - Works on desktop and mobile
-- **🎨 Modern UI** - Glass morphism design with smooth animations
+- **🔐 Authentication** - JWT-based authentication with Auth Service integration
+- **💬 Chat Interface** - Conversational UI for language learning with AI
+- **🎤 Audio Recording** - WebRTC audio capture for pronunciation practice
+- **🎵 Audio Playback** - Audio message playback with spectrum visualization
+- **📱 Responsive Design** - Mobile-first responsive interface
+- **🎨 Modern UI** - Tailwind CSS with custom animations and glass morphism
+- **🌐 Multi-language Support** - Support for English, Tamil, and Malayalam learning
 
 ## 🚀 Quick Start
 
@@ -50,12 +60,19 @@ src/
 └── index.css         # Styles
 ```
 
-## 🔌 API Endpoints
+## 🔌 API Integration
 
-- `POST /api/auth/login` - Authentication
-- `POST /api/auth/register` - Registration
-- `GET /api/auth/verify` - Token verification
-- `POST /api/audio/process` - Audio processing
+### Service Communication
+- **Conversation Service** (Port 8007): Main chat and pronunciation evaluation
+- **Auth Service** (Port 8001): User authentication and token management
+- **Audio Service** (Port 8003): Audio file upload and storage
+
+### Key API Endpoints Used
+- `POST /api/conversation/chat` - Send chat messages
+- `POST /api/conversation/evaluate-pronunciation` - Pronunciation evaluation
+- `POST /api/auth/login` - User authentication
+- `POST /api/auth/register` - User registration
+- `POST /api/audio/upload` - Audio file upload
 
 ## 🌐 Browser Support
 

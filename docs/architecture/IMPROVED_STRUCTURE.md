@@ -108,7 +108,7 @@ munshi/
 │   │   ├── requirements.txt
 │   │   └── README.md
 │   │
-│   ├── api-gateway/                             # API Gateway service
+│   ├── conversation-service/                    # Main orchestrator service
 │   │   ├── app/
 │   │   │   ├── __init__.py
 │   │   │   ├── main.py
@@ -118,22 +118,59 @@ munshi/
 │   │   │   │   └── middleware/
 │   │   │   ├── core/
 │   │   │   │   ├── __init__.py
-│   │   │   │   ├── router.py
-│   │   │   │   ├── rate_limiter.py
-│   │   │   │   └── circuit_breaker.py
+│   │   │   │   ├── orchestrator.py
+│   │   │   │   ├── models.py
+│   │   │   │   └── schemas.py
 │   │   │   ├── services/
+│   │   │   │   ├── ai_service_client.py
+│   │   │   │   └── user_service.py
 │   │   │   └── config.py
 │   │   ├── tests/
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
 │   │   └── README.md
 │   │
+│   ├── asr-service/                             # Speech recognition service
+│   │   ├── app/
+│   │   ├── tests/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── README.md
+│   │
+│   ├── llm-service/                             # Language model service
+│   │   ├── app/
+│   │   ├── tests/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── README.md
+│   │
+│   ├── pronunciation-evaluator/                 # Pronunciation evaluation service
+│   │   ├── app/
+│   │   ├── tests/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── README.md
+│   │
+│   ├── audio-service/                           # Audio storage service
+│   │   ├── app/
+│   │   ├── tests/
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── README.md
+│   │
+│   ├── ui-service/                              # Frontend React service
+│   │   ├── src/
+│   │   ├── dist/
+│   │   ├── tests/
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   └── README.md
+│   │
 │   └── ingress/                                 # Ingress/Proxy service
-│       ├── caddy/
-│       │   ├── Caddyfile
-│       │   ├── Dockerfile
-│       │   └── configs/
-│       └── nginx/                               # Alternative ingress
+│       └── nginx/                               # NGINX ingress configuration
+│           ├── nginx.conf
+│           ├── Dockerfile
+│           └── configs/
 │
 ├── tests/                                       # 🧪 Integration tests
 │   ├── __init__.py

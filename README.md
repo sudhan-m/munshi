@@ -112,9 +112,10 @@ The deployment script automatically:
 
 **Service Routing:**
 - `/` → UI Service (React chat interface)
-- `/api/conversation/*` → Conversation Service (main orchestrator)
-- `/api/audio/*` → Audio Service (file storage)
-- `/api/auth/*` → Auth Service (authentication)
+- `/api/conversation/` → Conversation Service (main orchestrator)
+- `/api/audio/` → Audio Service (file storage)
+- `/api/auth/` → Auth Service (authentication)
+- Internal AI Services: ASR (8004), LLM (8005), Evaluator (8006)
 
 ## 🎯 User Experience Flow
 
@@ -176,8 +177,11 @@ make logs SERVICE=conversation-service
 make logs SERVICE=asr-service
 make logs SERVICE=llm-service
 
+# Quick development setup
+make quick-dev
+
 # Scale services
-kubectl scale deployment munshi-conversation-service --replicas=3
+kubectl scale deployment conversation-service --replicas=3
 ```
 
 ### Environment Detection
@@ -432,9 +436,11 @@ pytest tests/load/test_conversation_scaling.py
 - [**ASR Service**](services/asr-service/README.md)
 - [**LLM Service**](services/llm-service/README.md)
 - [**Pronunciation Evaluator**](services/pronunciation-evaluator/README.md)
+- [**Audio Service**](services/audio-service/README.md)
 - [**UI Service**](services/ui-service/README.md)
-- [**Deployment Guide**](infrastructure/helm/README.md)
-- [**Contributing Guide**](docs/contributing/GUIDE.md)
+- [**Auth Service**](services/auth-service/README.md)
+- [**Configuration Guide**](docs/CONFIGURATION.md)
+- [**Contributing Guide**](CONTRIBUTING.md)
 
 ## 🎯 Future Enhancements
 

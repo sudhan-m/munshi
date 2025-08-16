@@ -296,166 +296,170 @@ class ConversationOrchestrator:
             if audio_response.status_code != 200:
                 return {"success": False, "error": "Could not retrieve audio file"}
             
-            # For now, we'll assume we get the audio file path - in production, 
-            # we'd need to handle the actual audio file transfer
-            with open(f"temp_audio_{audio_file_id}.wav", "wb") as f:
-                f.write(audio_response.content)
-            
-            # Step 2: Transcribe audio
-            with open(f"temp_audio_{audio_file_id}.wav", "rb") as audio_file:
-                asr_response = await self.http_client.post(
-                    f"{ASR_SERVICE_URL}/transcribe",
-                    files={"audio": audio_file},
-                    data={"language": language}
-                )
-            
-            if asr_response.status_code != 200:
-                return {"success": False, "error": "Transcription failed"}
-            
-            asr_result = asr_response.json()
-            if not asr_result.get("success"):
-                return {"success": False, "error": "Transcription was not successful"}
-            
-            actual_transcription = asr_result.get("transcription", "")
-            
-            # Step 3: Get transliterations from LLM service
-            intended_romanized = intended_text  # Default for English
-            actual_romanized = actual_transcription  # Default for English
-            
-            if language in ["Tamil", "Malayalam"]:
-                # Get intended transliteration
-                intended_response = await self.http_client.post(
-                    f"{LLM_SERVICE_URL}/transliterate",
-                    json={"text": intended_text, "source_language": language}
+            # Create temporary file with proper cleanup
+            temp_file_path = f"temp_audio_{audio_file_id}.wav"
+            try:
+                # Write audio content to temporary file
+                with open(temp_file_path, "wb") as f:
+                    f.write(audio_response.content)
+                
+                # Step 2: Transcribe audio
+                with open(temp_file_path, "rb") as audio_file:
+                    asr_response = await self.http_client.post(
+                        f"{ASR_SERVICE_URL}/transcribe",
+                        files={"audio": audio_file},
+                        data={"language": language}
+                    )
+                
+                if asr_response.status_code != 200:
+                    return {"success": False, "error": "Transcription failed"}
+                
+                asr_result = asr_response.json()
+                if not asr_result.get("success"):
+                    return {"success": False, "error": "Transcription was not successful"}
+                
+                actual_transcription = asr_result.get("transcription", "")
+                
+                # Step 3: Get transliterations from LLM service
+                intended_romanized = intended_text  # Default for English
+                actual_romanized = actual_transcription  # Default for English
+                
+                if language in ["Tamil", "Malayalam"]:
+                    # Get intended transliteration
+                    intended_response = await self.http_client.post(
+                        f"{LLM_SERVICE_URL}/transliterate",
+                        json={"text": intended_text, "source_language": language}
+                    )
+                    
+                    if intended_response.status_code == 200:
+                        intended_result = intended_response.json()
+                        if intended_result.get("success"):
+                            intended_romanized = intended_result.get("romanized_text", intended_text)
+                    
+                    # Get actual transliteration
+                    actual_response = await self.http_client.post(
+                        f"{LLM_SERVICE_URL}/transliterate",
+                        json={"text": actual_transcription, "source_language": language}
+                    )
+                    
+                    if actual_response.status_code == 200:
+                        actual_result = actual_response.json()
+                        if actual_result.get("success"):
+                            actual_romanized = actual_result.get("romanized_text", actual_transcription)
+                
+                # Step 4: Evaluate pronunciation
+                eval_response = await self.http_client.post(
+                    f"{EVALUATOR_SERVICE_URL}/evaluate",
+                    json={
+                        "intended_text": intended_text,
+                        "actual_text": actual_transcription,
+                        "intended_romanized": intended_romanized,
+                        "actual_romanized": actual_romanized,
+                        "language": language
+                    }
                 )
                 
-                if intended_response.status_code == 200:
-                    intended_result = intended_response.json()
-                    if intended_result.get("success"):
-                        intended_romanized = intended_result.get("romanized_text", intended_text)
+                if eval_response.status_code != 200:
+                    return {"success": False, "error": "Evaluation failed"}
                 
-                # Get actual transliteration
-                actual_response = await self.http_client.post(
-                    f"{LLM_SERVICE_URL}/transliterate",
-                    json={"text": actual_transcription, "source_language": language}
+                eval_result = eval_response.json()
+                if not eval_result.get("success"):
+                    return {"success": False, "error": "Evaluation was not successful"}
+                
+                # Step 5: Generate response using LLM
+                accuracy = eval_result["results"]["metrics"]["accuracy_percentage"]
+                errors = eval_result["results"]["pronunciation_errors"]
+                user_profile = await self.get_or_create_user_profile(user_id)
+                
+                response_response = await self.http_client.post(
+                    f"{LLM_SERVICE_URL}/generate-response",
+                    json={
+                        "accuracy": accuracy,
+                        "errors": errors,
+                        "user_context": {
+                            "language": language,
+                            "level": user_profile.get("skill_level", "beginner")
+                        }
+                    }
                 )
                 
-                if actual_response.status_code == 200:
-                    actual_result = actual_response.json()
-                    if actual_result.get("success"):
-                        actual_romanized = actual_result.get("romanized_text", actual_transcription)
-            
-            # Step 4: Evaluate pronunciation
-            eval_response = await self.http_client.post(
-                f"{EVALUATOR_SERVICE_URL}/evaluate",
-                json={
-                    "intended_text": intended_text,
-                    "actual_text": actual_transcription,
-                    "intended_romanized": intended_romanized,
-                    "actual_romanized": actual_romanized,
-                    "language": language
-                }
-            )
-            
-            if eval_response.status_code != 200:
-                return {"success": False, "error": "Evaluation failed"}
-            
-            eval_result = eval_response.json()
-            if not eval_result.get("success"):
-                return {"success": False, "error": "Evaluation was not successful"}
-            
-            # Step 5: Generate response using LLM
-            accuracy = eval_result["results"]["metrics"]["accuracy_percentage"]
-            errors = eval_result["results"]["pronunciation_errors"]
-            user_profile = await self.get_or_create_user_profile(user_id)
-            
-            response_response = await self.http_client.post(
-                f"{LLM_SERVICE_URL}/generate-response",
-                json={
-                    "accuracy": accuracy,
-                    "errors": errors,
-                    "user_context": {
+                llm_response_text = "Great job practicing!"
+                if response_response.status_code == 200:
+                    response_result = response_response.json()
+                    if response_result.get("success"):
+                        llm_response_text = response_result.get("response", llm_response_text)
+                
+                # Step 6: Update user profile with results
+                users_collection = get_users_collection()
+                await users_collection.update_one(
+                    {"user_id": user_id},
+                    {
+                        "$set": {
+                            "last_active": datetime.utcnow(),
+                            "best_accuracy": max(user_profile.get("best_accuracy", 0), accuracy)
+                        },
+                        "$inc": {"session_count": 1}
+                    }
+                )
+                
+                # Step 7: Update pronunciation profile with evaluation results
+                character_errors = eval_result["results"].get("character_mispronunciations", [])
+                updated_profile = self.pronunciation_manager.update_profile_with_evaluation(
+                    pronunciation_profile,
+                    character_errors,
+                    accuracy,
+                    intended_text,
+                    actual_transcription,
+                    language
+                )
+                
+                # Save updated profile to database
+                await self.save_pronunciation_profile(updated_profile)
+                
+                # Check if profile needs compaction
+                if await self.pronunciation_manager.should_compact_profile(updated_profile):
+                    compacted_profile = await self.pronunciation_manager.compact_profile_with_llm(updated_profile)
+                    await self.save_pronunciation_profile(compacted_profile)
+                
+                # Step 8: Save evaluation to conversation history
+                await self.save_conversation_message(
+                    user_id, 
+                    "evaluation", 
+                    f"Pronunciation practice: {accuracy}% accuracy",
+                    {
+                        "evaluation_results": eval_result["results"],
+                        "intended_text": intended_text,
                         "language": language,
-                        "level": user_profile.get("skill_level", "beginner")
+                        "character_errors": character_errors
+                    }
+                )
+                
+                await self.save_conversation_message(
+                    user_id,
+                    "assistant", 
+                    llm_response_text,
+                    {"type": "evaluation_response"}
+                )
+                
+                return {
+                    "success": True,
+                    "evaluation_results": eval_result["results"],
+                    "llm_response": llm_response_text,
+                    "pronunciation_insights": {
+                        "target_phonemes": await self.pronunciation_manager.suggest_target_phonemes(
+                            updated_profile, context_text, count=3
+                        ),
+                        "overall_accuracy": updated_profile["metadata"]["overall_accuracy"]
                     }
                 }
-            )
             
-            llm_response_text = "Great job practicing!"
-            if response_response.status_code == 200:
-                response_result = response_response.json()
-                if response_result.get("success"):
-                    llm_response_text = response_result.get("response", llm_response_text)
-            
-            # Step 6: Update user profile with results
-            users_collection = get_users_collection()
-            await users_collection.update_one(
-                {"user_id": user_id},
-                {
-                    "$set": {
-                        "last_active": datetime.utcnow(),
-                        "best_accuracy": max(user_profile.get("best_accuracy", 0), accuracy)
-                    },
-                    "$inc": {"session_count": 1}
-                }
-            )
-            
-            # Step 7: Update pronunciation profile with evaluation results
-            character_errors = eval_result["results"].get("character_mispronunciations", [])
-            updated_profile = self.pronunciation_manager.update_profile_with_evaluation(
-                pronunciation_profile,
-                character_errors,
-                accuracy,
-                intended_text,
-                actual_transcription,
-                language
-            )
-            
-            # Save updated profile to database
-            await self.save_pronunciation_profile(updated_profile)
-            
-            # Check if profile needs compaction
-            if await self.pronunciation_manager.should_compact_profile(updated_profile):
-                compacted_profile = await self.pronunciation_manager.compact_profile_with_llm(updated_profile)
-                await self.save_pronunciation_profile(compacted_profile)
-            
-            # Step 8: Save evaluation to conversation history
-            await self.save_conversation_message(
-                user_id, 
-                "evaluation", 
-                f"Pronunciation practice: {accuracy}% accuracy",
-                {
-                    "evaluation_results": eval_result["results"],
-                    "intended_text": intended_text,
-                    "language": language,
-                    "character_errors": character_errors
-                }
-            )
-            
-            await self.save_conversation_message(
-                user_id,
-                "assistant", 
-                llm_response_text,
-                {"type": "evaluation_response"}
-            )
-            
-            # Clean up temp file
-            try:
-                os.unlink(f"temp_audio_{audio_file_id}.wav")
-            except:
-                pass
-            
-            return {
-                "success": True,
-                "evaluation_results": eval_result["results"],
-                "llm_response": llm_response_text,
-                "pronunciation_insights": {
-                    "target_phonemes": await self.pronunciation_manager.suggest_target_phonemes(
-                        updated_profile, context_text, count=3
-                    ),
-                    "overall_accuracy": updated_profile["metadata"]["overall_accuracy"]
-                }
-            }
+            finally:
+                # Ensure temporary file is always cleaned up
+                try:
+                    if os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+                except Exception as cleanup_error:
+                    print(f"Warning: Could not clean up temporary file {temp_file_path}: {cleanup_error}")
             
         except Exception as e:
             print(f"Error in pronunciation evaluation: {e}")

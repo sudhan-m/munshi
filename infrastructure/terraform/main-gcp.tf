@@ -317,6 +317,54 @@ resource "google_service_account" "cluster_service_account" {
   display_name = "GKE Cluster Service Account"
 }
 
+# Grant required IAM roles to the cluster service account
+resource "google_project_iam_member" "cluster_service_account_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cluster_service_account.email}"
+}
+
+resource "google_project_iam_member" "cluster_service_account_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.cluster_service_account.email}"
+}
+
+resource "google_project_iam_member" "cluster_service_account_monitoring_viewer" {
+  project = var.project_id
+  role    = "roles/monitoring.viewer"
+  member  = "serviceAccount:${google_service_account.cluster_service_account.email}"
+}
+
+resource "google_project_iam_member" "cluster_service_account_artifact_registry" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.cluster_service_account.email}"
+}
+
+# Storage bucket for model files
+resource "google_storage_bucket" "model_storage" {
+  name          = "${var.project_id}-munshi-models"
+  location      = var.region
+  force_destroy = true
+
+  versioning {
+    enabled = true
+  }
+
+  labels = {
+    environment = var.environment
+    project     = "munshi"
+  }
+}
+
+# Grant storage access to cluster service account
+resource "google_project_iam_member" "cluster_service_account_storage" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.cluster_service_account.email}"
+}
+
 # Get current Google Cloud client configuration
 data "google_client_config" "provider" {}
 
@@ -337,7 +385,10 @@ provider "helm" {
 }
 
 # Create cert-manager namespace
+# Optional cert-manager namespace
 resource "kubernetes_namespace" "cert_manager" {
+  count = var.enable_cert_manager ? 1 : 0
+  
   metadata {
     name = "cert-manager"
     labels = {
@@ -347,13 +398,16 @@ resource "kubernetes_namespace" "cert_manager" {
   depends_on = [google_container_cluster.cluster]
 }
 
-# Install cert-manager using Helm
+# Optional cert-manager installation using Helm
 resource "helm_release" "cert_manager" {
+  count = var.enable_cert_manager ? 1 : 0
+  
   name       = "cert-manager"
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
   version    = "v1.13.2"
-  namespace  = kubernetes_namespace.cert_manager.metadata[0].name
+  namespace  = kubernetes_namespace.cert_manager[0].metadata[0].name
+  timeout    = var.deployment_timeout
 
   set {
     name  = "installCRDs"
@@ -362,11 +416,84 @@ resource "helm_release" "cert_manager" {
 
   set {
     name  = "global.leaderElection.namespace"
-    value = kubernetes_namespace.cert_manager.metadata[0].name
+    value = kubernetes_namespace.cert_manager[0].metadata[0].name
   }
 
   depends_on = [
     kubernetes_namespace.cert_manager,
     google_container_node_pool.general_nodes
+  ]
+}
+
+# Database initialization job
+resource "kubernetes_job" "database_init" {
+  count = var.enable_database_init ? 1 : 0
+  
+  metadata {
+    name      = "database-init"
+    namespace = var.namespace
+  }
+  
+  spec {
+    template {
+      metadata {}
+      spec {
+        restart_policy = "OnFailure"
+        
+        container {
+          name    = "postgres-init"
+          image   = "postgres:15-alpine"
+          command = ["/bin/sh"]
+          args = ["-c", <<-EOT
+            export PGPASSWORD="$POSTGRES_PASSWORD"
+            echo "Waiting for PostgreSQL to be ready..."
+            until pg_isready -h $POSTGRES_HOST -p 5432 -U postgres; do
+              echo "PostgreSQL not ready, waiting..."
+              sleep 5
+            done
+            echo "PostgreSQL is ready, creating database and user..."
+            psql -h $POSTGRES_HOST -U postgres -c "CREATE DATABASE IF NOT EXISTS munshi_auth;"
+            psql -h $POSTGRES_HOST -U postgres -c "CREATE USER IF NOT EXISTS munshi_user WITH PASSWORD '$MUNSHI_PASSWORD';"
+            psql -h $POSTGRES_HOST -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE munshi_auth TO munshi_user;"
+            psql -h $POSTGRES_HOST -U postgres -d munshi_auth -c "GRANT ALL ON SCHEMA public TO munshi_user;"
+            psql -h $POSTGRES_HOST -U postgres -d munshi_auth -c "GRANT CREATE ON SCHEMA public TO munshi_user;"
+            echo "Database initialization completed successfully!"
+          EOT
+          ]
+          
+          env {
+            name  = "POSTGRES_HOST"
+            value = "munshi-platform-postgresql"
+          }
+          env {
+            name  = "POSTGRES_PASSWORD"
+            value = var.postgres_password
+          }
+          env {
+            name  = "MUNSHI_PASSWORD"
+            value = var.munshi_db_password
+          }
+        }
+        
+        # Use database node pool
+        node_selector = {
+          workload-type = "database"
+        }
+        
+        toleration {
+          key    = "workload-type"
+          value  = "database" 
+          effect = "NoSchedule"
+        }
+      }
+    }
+    
+    backoff_limit              = 3
+    ttl_seconds_after_finished = 300
+  }
+  
+  depends_on = [
+    google_container_node_pool.database_nodes,
+    google_container_cluster.cluster
   ]
 }

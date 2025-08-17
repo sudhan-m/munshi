@@ -15,3 +15,13 @@ google_api_key = "your-google-gemini-api-key"
 # namespace = "munshi-prod"
 # environment = "production"
 # use_spot_instances = true
+
+# Optional components (disabled by default for stability)
+# enable_cert_manager = false
+# enable_ingress_nginx = false
+# deployment_timeout = 300
+
+# Database configuration (optional - uses defaults if not specified)
+# enable_database_init = true
+# postgres_password = "postgres123"
+# munshi_db_password = "munshi_password"

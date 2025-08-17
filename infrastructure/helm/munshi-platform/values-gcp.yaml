@@ -3,13 +3,12 @@
 
 # Global configuration
 global:
-  imageRegistry: "us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers"
-  imagePullSecrets:
-    - name: artifact-registry-creds
+  imageRegistry: ""
+  imagePullSecrets: []
 
 # Image configuration
 image:
-  registry: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers
+  registry: ""
   pullPolicy: Always
   tag: "latest"
 
@@ -20,33 +19,33 @@ services:
     enabled: true
     name: auth-service
     image:
-      repository: munshi-auth-service
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-auth-service
       tag: latest
     port: 8001
     targetPort: 8001
     replicas: 2
     resources:
       limits:
-        cpu: 500m
-        memory: 1Gi
-      requests:
-        cpu: 200m
+        cpu: 300m
         memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
     env:
       - name: DATABASE_URL
-        value: "postgresql://munshi_user:munshi_password@postgresql:5432/munshi_auth"
+        value: "postgresql://munshi_user:munshi_password@munshi-platform-postgresql:5432/munshi_auth"
       - name: JWT_SECRET
         valueFrom:
           secretKeyRef:
-            name: jwt-secret
-            key: secret
+            name: auth-secrets
+            key: jwt-secret
 
   # Audio Service
   audioService:
     enabled: true
     name: audio-service
     image:
-      repository: munshi-audio-service
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-audio-service
       tag: latest
     port: 8003
     targetPort: 8003
@@ -59,25 +58,23 @@ services:
         cpu: 200m
         memory: 256Mi
 
-  # ASR Service
+  # ASR Service  
   asrService:
     enabled: true
     name: asr-service
     image:
-      repository: munshi-asr-service
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-asr-service
       tag: latest
     port: 8004
     targetPort: 8004
     replicas: 1
     resources:
       limits:
-        cpu: 2000m
-        memory: 6Gi
-        nvidia.com/gpu: 1
+        cpu: 500m
+        memory: 800Mi
       requests:
-        cpu: 1000m
-        memory: 4Gi
-        nvidia.com/gpu: 1
+        cpu: 200m
+        memory: 400Mi
     nodeSelector:
       cloud.google.com/gke-accelerator: nvidia-tesla-t4
     tolerations:
@@ -85,21 +82,29 @@ services:
         operator: Exists
         effect: NoSchedule
     env:
-      - name: CLOUD_RUN_MODE
-        value: "false"
       - name: GPU_SUPPORT
-        value: "cuda"
+        value: "auto"
       - name: MODEL_CACHE_SIZE
         value: "3"
       - name: CUDA_VISIBLE_DEVICES
         value: "0"
+      - name: MODEL_STORAGE_BUCKET
+        valueFrom:
+          configMapKeyRef:
+            name: model-storage-config
+            key: bucket-name
+      - name: MODEL_CACHE_DIR
+        valueFrom:
+          configMapKeyRef:
+            name: model-storage-config
+            key: cache-dir
 
   # Conversation Service
   conversationService:
     enabled: true
     name: conversation-service
     image:
-      repository: munshi-conversation-service
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-conversation-service
       tag: latest
     port: 8007
     targetPort: 8007
@@ -128,18 +133,25 @@ services:
     enabled: true
     name: llm-service
     image:
-      repository: munshi-llm-service
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-llm-service
       tag: latest
     port: 8005
     targetPort: 8005
     replicas: 2
     resources:
       limits:
-        cpu: 1000m
-        memory: 2Gi
-      requests:
         cpu: 500m
         memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+    nodeSelector:
+      workload-type: "memory-intensive"
+    tolerations:
+      - key: workload-type
+        operator: Equal
+        value: "memory-intensive"
+        effect: NoSchedule
     env:
       - name: GOOGLE_API_KEY
         valueFrom:
@@ -152,7 +164,7 @@ services:
     enabled: true
     name: pronunciation-evaluator
     image:
-      repository: munshi-pronunciation-evaluator
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-pronunciation-evaluator
       tag: latest
     port: 8006
     targetPort: 8006
@@ -170,11 +182,12 @@ services:
     enabled: true
     name: ui-service
     image:
-      repository: munshi-ui-service
+      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-ui-service
       tag: latest
-    port: 8002
+    port: 80
     targetPort: 8002
     replicas: 2
+    serviceType: LoadBalancer
     resources:
       limits:
         cpu: 300m
@@ -193,7 +206,7 @@ postgresql:
   enabled: true
   auth:
     postgresPassword: "postgres123"
-    database: "munshi"
+    database: "munshi_auth"
     username: "munshi_user"
     password: "munshi_password"
   primary:
@@ -233,6 +246,11 @@ mongodb:
       effect: "NoSchedule"
   architecture: standalone
 
+# Secrets configuration
+secrets:
+  jwt_secret: "your-jwt-secret-here-change-in-production"
+  google_api_key: "your-google-api-key-here"
+
 # Redis configuration for GCP
 redis:
   enabled: true
@@ -258,18 +276,18 @@ ingress:
   className: "gce"
   annotations:
     kubernetes.io/ingress.class: gce
-    kubernetes.io/ingress.global-static-ip-name: "munshi-ip"
-    networking.gke.io/managed-certificates: "munshi-ssl-cert"
     kubernetes.io/ingress.allow-http: "true"
   hosts:
-    - host: munshi.example.com
+    - host: munshi-demo.duckdns.org
       paths:
         - path: /
           pathType: Prefix
-  tls:
-    - secretName: munshi-tls
-      hosts:
-        - munshi.example.com
+          backend:
+            service:
+              name: ui-service
+              port:
+                number: 80
+  tls: []
 
 # Environment-specific overrides
 environment: production

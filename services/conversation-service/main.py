@@ -688,9 +688,16 @@ async def get_pronunciation_profile(user_id: str, language: str):
         )
 
 if __name__ == "__main__":
+    port_env = os.getenv("CONVERSATION_SERVICE_PORT", "8007")
+    # Handle Kubernetes service environment variable format (tcp://host:port)
+    if port_env.startswith("tcp://"):
+        port = int(port_env.split(":")[-1])
+    else:
+        port = int(port_env)
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("CONVERSATION_SERVICE_PORT", 8007)),
+        port=port,
         reload=True
     )

@@ -2,7 +2,7 @@
 
 # Configuration
 PROJECT_NAME := munshi
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION := $(shell date +%Y%m%d-%H%M%S)
 PROJECT_ID := central-list-469110-f1
 REGION := us-central1
 REGISTRY := $(REGION)-docker.pkg.dev/$(PROJECT_ID)/munshi-containers
@@ -15,7 +15,7 @@ YELLOW := \033[1;33m
 RED := \033[0;31m
 NC := \033[0m
 
-.PHONY: help clean env-init deploy build push test lint format version init status takedown destroy
+.PHONY: help clean env-init deploy build push test lint format version init plan status takedown destroy
 
 help: ## Show this help message
 	@echo "$(BLUE)🎓 Munshi Platform$(NC)"
@@ -43,32 +43,107 @@ env-init: ## Create GCP infrastructure (cluster, node pools, networking)
 		echo "$(YELLOW)Run: make init first$(NC)"; \
 		exit 1; \
 	fi
-	@# Initialize Terraform
-	@cd infrastructure/terraform && terraform init
-	@# Check if cluster already exists and import if needed
+	@# Check if infrastructure already exists and is ready
 	@if gcloud container clusters describe munshi-cluster --zone=us-central1-a --project=central-list-469110-f1 >/dev/null 2>&1; then \
-		echo "$(YELLOW)⚠️  Cluster exists, importing into Terraform state...$(NC)"; \
-		cd infrastructure/terraform && terraform import google_container_cluster.cluster central-list-469110-f1/us-central1-a/munshi-cluster 2>/dev/null || true; \
+		echo "$(GREEN)✓ GKE cluster already exists$(NC)"; \
+		gcloud container clusters get-credentials munshi-cluster --zone=us-central1-a --project=central-list-469110-f1; \
+		if kubectl get nodes --no-headers 2>/dev/null | grep -q Ready; then \
+			echo "$(GREEN)✓ Cluster is ready and accessible$(NC)"; \
+			echo "$(BLUE)ℹ️  Skipping infrastructure creation (already exists)$(NC)"; \
+			echo "$(GREEN)✓ Infrastructure ready$(NC)"; \
+			exit 0; \
+		fi; \
 	fi
-	@# Apply infrastructure changes
-	@cd infrastructure/terraform && terraform apply -auto-approve
-	@# Configure kubectl access
+	@# Check what else exists
+	@$(MAKE) _check-existing-infrastructure
+	@# Initialize Terraform
+	@echo "$(BLUE)📋 Initializing Terraform...$(NC)"
+	@cd infrastructure/terraform && terraform init
+	@# Import existing resources to avoid conflicts
+	@$(MAKE) _import-existing-resources
+	@# Show what will be changed
+	@echo "$(BLUE)📋 Planning infrastructure changes...$(NC)"
+	@cd infrastructure/terraform && \
+		if terraform plan -var="enable_cert_manager=false" -out=tfplan | grep -q "No changes"; then \
+			echo "$(GREEN)✓ No infrastructure changes needed$(NC)"; \
+		else \
+			echo "$(YELLOW)⚠️  Infrastructure changes detected$(NC)"; \
+		fi
+	@# Apply infrastructure changes with retry logic
+	@echo "$(BLUE)🏗️  Applying infrastructure changes...$(NC)"
+	@cd infrastructure/terraform && \
+		for i in 1 2 3; do \
+			echo "Attempt $$i/3..."; \
+			if terraform apply tfplan; then \
+				echo "$(GREEN)✓ Infrastructure applied successfully$(NC)"; \
+				break; \
+			else \
+				echo "$(YELLOW)⚠️  Attempt $$i failed, retrying...$(NC)"; \
+				if [ $$i -eq 3 ]; then \
+					echo "$(RED)❌ All attempts failed$(NC)"; \
+					exit 1; \
+				fi; \
+				terraform plan -var="enable_cert_manager=false" -out=tfplan; \
+				sleep 30; \
+			fi; \
+		done
+	@# Configure kubectl access and verify
+	@echo "$(BLUE)🔧 Configuring kubectl access...$(NC)"
 	@gcloud container clusters get-credentials munshi-cluster --zone=us-central1-a --project=central-list-469110-f1
+	@# Wait for cluster to be ready
+	@echo "$(BLUE)⏳ Waiting for cluster readiness...$(NC)"
+	@$(MAKE) _wait-for-cluster
 	@echo "$(GREEN)✓ Infrastructure ready$(NC)"
 
 deploy: ## Deploy application, only building changed services
 	@echo "$(BLUE)🚀 Smart deploying application...$(NC)"
-	@# Check if cluster exists
+	@# Check if cluster exists and is ready
+	@echo "$(BLUE)🔍 Checking cluster status...$(NC)"
 	@gcloud container clusters describe munshi-cluster --zone=us-central1-a --project=central-list-469110-f1 >/dev/null 2>&1 || \
 		(echo "$(RED)❌ Infrastructure not found. Run 'make env-init' first$(NC)" && exit 1)
-	@# Smart build and push only changed services
-	@./scripts/smart-deploy.sh
-	@# Create namespace
-	@kubectl create namespace munshi-prod --dry-run=client -o yaml | kubectl apply -f -
-	@# Create secrets
+	@# Ensure kubectl access and cluster readiness
+	@gcloud container clusters get-credentials munshi-cluster --zone=us-central1-a --project=central-list-469110-f1
+	@$(MAKE) _wait-for-cluster
+	@# Apply any pending Terraform changes for IAM and permissions
+	@echo "$(BLUE)🔐 Updating IAM permissions...$(NC)"
 	@cd infrastructure/terraform && \
-		GOOGLE_API_KEY=$$(grep -E "^google_api_key" terraform.tfvars | cut -d'"' -f2) && \
-		JWT_SECRET=$$(grep -E "^jwt_secret" terraform.tfvars | cut -d'"' -f2) && \
+		terraform init && \
+		terraform plan -var="enable_cert_manager=false" -out=tfplan && \
+		terraform apply tfplan
+	@# Clean up problematic pods before deployment
+	@echo "$(BLUE)🧹 Cleaning up problematic pods...$(NC)"
+	@kubectl delete pods --namespace munshi-prod --field-selector=status.phase=Pending --ignore-not-found=true || true
+	@kubectl delete pods --namespace munshi-prod --field-selector=status.phase=Failed --ignore-not-found=true || true
+	@kubectl get pods --namespace munshi-prod 2>/dev/null | grep -E "(ImagePullBackOff|ErrImagePull|CrashLoopBackOff)" | awk '{print $$1}' | xargs -r kubectl delete pods --namespace munshi-prod --ignore-not-found=true || true
+	@# Smart build and push only changed services
+	@echo "$(BLUE)🏗️  Building and pushing changed services...$(NC)"
+	@./scripts/smart-deploy.sh
+	@# Create namespace with retry
+	@echo "$(BLUE)📁 Setting up namespace and secrets...$(NC)"
+	@for i in 1 2 3; do \
+		if kubectl create namespace munshi-prod --dry-run=client -o yaml | kubectl apply -f -; then \
+			break; \
+		else \
+			echo "$(YELLOW)⚠️  Namespace creation attempt $$i failed, retrying...$(NC)"; \
+			sleep 5; \
+		fi; \
+	done
+	@# Create secrets with error handling
+	@cd infrastructure/terraform && \
+		if [ -n "$$GOOGLE_API_KEY" ]; then \
+			echo "Using GOOGLE_API_KEY from environment"; \
+		else \
+			GOOGLE_API_KEY=$$(grep -E "^google_api_key" terraform.tfvars 2>/dev/null | cut -d'"' -f2); \
+		fi && \
+		if [ -n "$$JWT_SECRET" ]; then \
+			echo "Using JWT_SECRET from environment"; \
+		else \
+			JWT_SECRET=$$(grep -E "^jwt_secret" terraform.tfvars 2>/dev/null | cut -d'"' -f2); \
+			if [ -z "$$JWT_SECRET" ] || [ "$$JWT_SECRET" = "your-jwt-secret-here" ]; then \
+				JWT_SECRET=$$(openssl rand -base64 32); \
+				echo "Generated JWT_SECRET: $$JWT_SECRET"; \
+			fi; \
+		fi && \
 		kubectl create secret generic google-api-keys \
 			--from-literal=api-key="$$GOOGLE_API_KEY" \
 			-n munshi-prod --dry-run=client -o yaml | kubectl apply -f - && \
@@ -80,16 +155,44 @@ deploy: ## Deploy application, only building changed services
 			--from-literal=auth-db-url="postgresql://munshi_user:munshi_password@munshi-platform-postgresql:5432/munshi_auth" \
 			--from-literal=audio-db-url="postgresql://munshi_user:munshi_password@munshi-platform-postgresql:5432/munshi_audio" \
 			-n munshi-prod --dry-run=client -o yaml | kubectl apply -f -
-	@# Deploy with Helm
+	@# Deploy with Helm with retry logic
+	@echo "$(BLUE)⚡ Deploying with Helm...$(NC)"
 	@cd infrastructure/helm/munshi-platform && \
 		helm repo add bitnami https://charts.bitnami.com/bitnami --force-update && \
 		helm repo update && \
 		helm dependency update && \
-		helm upgrade --install munshi-platform . \
-			--namespace munshi-prod \
-			--values values-gcp.yaml \
-			--set global.imageRegistry="$(REGISTRY)" \
-			--wait --timeout=600s
+		HELM_SET_ARGS=$$(cat /tmp/munshi-helm-set-args 2>/dev/null || echo "") && \
+		for i in 1 2; do \
+			echo "Helm deployment attempt $$i/2..."; \
+			if helm upgrade --install munshi-platform . \
+				--namespace munshi-prod \
+				--values values-gcp.yaml \
+				--set global.imageRegistry="" \
+				--set image.tag="$(VERSION)" \
+				$$HELM_SET_ARGS \
+				--wait --timeout=1200s; then \
+				echo "$(GREEN)✓ Helm deployment successful$(NC)"; \
+				break; \
+			else \
+				echo "$(YELLOW)⚠️  Helm deployment attempt $$i failed$(NC)"; \
+				if [ $$i -eq 2 ]; then \
+					echo "$(RED)❌ All Helm deployment attempts failed$(NC)"; \
+					exit 1; \
+				fi; \
+				sleep 30; \
+			fi; \
+		done
+	@# Show deployment status and access information
+	@echo "$(GREEN)✓ Deployment complete!$(NC)"
+	@echo "$(BLUE)📋 Access Information:$(NC)"
+	@EXTERNAL_IP=$$(kubectl get service ui-service -n munshi-prod -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending"); \
+		if [ "$$EXTERNAL_IP" != "pending" ] && [ "$$EXTERNAL_IP" != "" ]; then \
+			echo "  🌐 Application URL: http://$$EXTERNAL_IP"; \
+			echo "  📋 Set your domain DNS A record to: $$EXTERNAL_IP"; \
+		else \
+			echo "  ⏳ LoadBalancer IP is still being assigned..."; \
+			echo "  🔍 Check status: kubectl get service ui-service -n munshi-prod"; \
+		fi
 	@echo "$(GREEN)✓ Application deployed$(NC)"
 
 build: ## Build all Docker images
@@ -99,11 +202,7 @@ build: ## Build all Docker images
 		if [ -d "services/$$service" ]; then \
 			echo "Building $$service..."; \
 			cd services/$$service; \
-			BUILD_ARGS="--platform linux/amd64"; \
-			if [ "$$service" = "asr-service" ]; then \
-				BUILD_ARGS="$$BUILD_ARGS --build-arg GPU_SUPPORT=gpu"; \
-			fi; \
-			docker build $$BUILD_ARGS -t $(REGISTRY)/munshi-$$service:$(VERSION) -t $(REGISTRY)/munshi-$$service:latest .; \
+			docker build --platform linux/amd64 -t $(REGISTRY)/munshi-$$service:$(VERSION) -t $(REGISTRY)/munshi-$$service:latest .; \
 			cd ../..; \
 		fi; \
 	done
@@ -185,16 +284,54 @@ init: ## Initialize project configuration (creates terraform.tfvars)
 		echo ""; \
 		echo "$(BLUE)💡 Next steps:$(NC)"; \
 		echo "  1. Edit terraform.tfvars"; \
-		echo "  2. Run: make env-init"; \
-		echo "  3. Run: make deploy"; \
+		echo "  2. Run: make plan (to see what will be created)"; \
+		echo "  3. Run: make env-init (to create infrastructure)"; \
+		echo "  4. Run: make deploy (to deploy application)"; \
 	else \
 		echo "$(GREEN)✓ terraform.tfvars already exists$(NC)"; \
 	fi
 
+plan: ## Show what infrastructure changes would be made (dry-run)
+	@echo "$(BLUE)📋 Planning infrastructure changes...$(NC)"
+	@if [ ! -f "infrastructure/terraform/terraform.tfvars" ]; then \
+		echo "$(RED)❌ terraform.tfvars not found$(NC)"; \
+		echo "$(YELLOW)Run: make init first$(NC)"; \
+		exit 1; \
+	fi
+	@$(MAKE) _check-existing-infrastructure
+	@cd infrastructure/terraform && terraform init
+	@$(MAKE) _import-existing-resources
+	@echo "$(BLUE)📋 Terraform plan results:$(NC)"
+	@cd infrastructure/terraform && terraform plan -var="enable_cert_manager=false"
+
 status: ## Show deployment status
 	@echo "$(BLUE)📊 Deployment Status$(NC)"
-	@kubectl get pods -n munshi-prod 2>/dev/null || echo "No deployment found"
-	@kubectl get services -n munshi-prod 2>/dev/null || echo "No services found"
+	@echo "$(BLUE)🏗️  Infrastructure:$(NC)"
+	@if gcloud container clusters describe munshi-cluster --zone=us-central1-a --project=central-list-469110-f1 >/dev/null 2>&1; then \
+		echo "  ✅ GKE Cluster: munshi-cluster (running)"; \
+	else \
+		echo "  ❌ GKE Cluster: not found"; \
+	fi
+	@echo "$(BLUE)🚀 Applications:$(NC)"
+	@if kubectl get namespace munshi-prod >/dev/null 2>&1; then \
+		echo "  ✅ Namespace: munshi-prod"; \
+		READY_PODS=$$(kubectl get pods -n munshi-prod --field-selector=status.phase=Running 2>/dev/null | grep -c "Running" || echo "0"); \
+		TOTAL_PODS=$$(kubectl get pods -n munshi-prod 2>/dev/null | grep -v NAME | wc -l || echo "0"); \
+		echo "  📦 Pods: $$READY_PODS/$$TOTAL_PODS running"; \
+		EXTERNAL_IP=$$(kubectl get service ui-service -n munshi-prod -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending"); \
+		if [ "$$EXTERNAL_IP" != "pending" ] && [ "$$EXTERNAL_IP" != "" ]; then \
+			echo "  🌐 Application URL: http://$$EXTERNAL_IP"; \
+			echo "  📋 DNS Setup: Point your domain A record to $$EXTERNAL_IP"; \
+		else \
+			echo "  ⏳ External IP: pending (LoadBalancer creating...)"; \
+		fi; \
+	else \
+		echo "  ❌ Application: not deployed"; \
+	fi
+	@echo "$(BLUE)📋 Quick Commands:$(NC)"
+	@echo "  Deploy: make deploy"
+	@echo "  Logs: kubectl logs -f deployment/ui-service -n munshi-prod"
+	@echo "  Scale: kubectl scale deployment ui-service --replicas=3 -n munshi-prod"
 
 takedown: ## Remove application deployment (keep infrastructure)
 	@echo "$(YELLOW)🗑️  Taking down application deployment...$(NC)"
@@ -231,3 +368,85 @@ destroy: ## Destroy all infrastructure (WARNING: Deletes everything)
 	@echo "$(GREEN)✓ All infrastructure destroyed$(NC)"
 
 deploy-fresh: build push deploy ## Build, push, and deploy application to existing infrastructure
+
+
+# Internal helper functions
+_wait-for-cluster: ## Wait for cluster to be ready (internal use)
+	@echo "$(BLUE)⏳ Waiting for cluster nodes to be ready...$(NC)"
+	@for i in $$(seq 1 30); do \
+		if kubectl get nodes --no-headers 2>/dev/null | grep -q Ready; then \
+			echo "$(GREEN)✓ Cluster nodes are ready$(NC)"; \
+			break; \
+		else \
+			echo "Waiting for nodes... ($$i/30)"; \
+			sleep 10; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "$(RED)❌ Timeout waiting for cluster readiness$(NC)"; \
+			kubectl get nodes 2>/dev/null || echo "Cannot access cluster"; \
+			exit 1; \
+		fi; \
+	done
+	@echo "$(BLUE)🔍 Verifying cluster connectivity...$(NC)"
+	@kubectl cluster-info --request-timeout=10s >/dev/null || \
+		(echo "$(RED)❌ Cluster connectivity test failed$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Cluster is ready and accessible$(NC)"
+
+_check-prerequisites: ## Check if required tools are installed (internal use)
+	@echo "$(BLUE)🔧 Checking prerequisites...$(NC)"
+	@for tool in gcloud kubectl helm docker terraform; do \
+		if ! command -v $$tool >/dev/null 2>&1; then \
+			echo "$(RED)❌ $$tool is not installed$(NC)"; \
+			exit 1; \
+		else \
+			echo "$(GREEN)✓ $$tool found$(NC)"; \
+		fi; \
+	done
+
+_check-existing-infrastructure: ## Check what infrastructure already exists (internal use)
+	@echo "$(BLUE)🔍 Checking existing infrastructure...$(NC)"
+	@# Check GKE cluster
+	@if gcloud container clusters describe munshi-cluster --zone=us-central1-a --project=central-list-469110-f1 >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ GKE cluster exists$(NC)"; \
+	else \
+		echo "$(YELLOW)⚠️  GKE cluster will be created$(NC)"; \
+	fi
+	@# Check Artifact Registry
+	@if gcloud artifacts repositories describe munshi-containers --location=us-central1 >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ Artifact Registry exists$(NC)"; \
+	else \
+		echo "$(YELLOW)⚠️  Artifact Registry will be created$(NC)"; \
+	fi
+	@# Check model storage bucket
+	@if gsutil ls gs://central-list-469110-f1-munshi-models >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ Model storage bucket exists$(NC)"; \
+	else \
+		echo "$(YELLOW)⚠️  Model storage bucket will be created$(NC)"; \
+	fi
+	@# Check node pools
+	@if gcloud container node-pools list --cluster=munshi-cluster --zone=us-central1-a >/dev/null 2>&1; then \
+		NODE_POOLS=$$(gcloud container node-pools list --cluster=munshi-cluster --zone=us-central1-a --format="value(name)" | wc -l); \
+		echo "$(GREEN)✓ $$NODE_POOLS node pools exist$(NC)"; \
+	fi
+
+_import-existing-resources: ## Import existing resources into Terraform state (internal use)
+	@echo "$(BLUE)📥 Importing existing resources...$(NC)"
+	@cd infrastructure/terraform && \
+		PROJECT_ID=$$(grep -E "^project_id" terraform.tfvars | cut -d'"' -f2) && \
+		echo "Using project: $$PROJECT_ID" && \
+		IMPORTS_DONE=0 && \
+		if gcloud container clusters describe munshi-cluster --zone=us-central1-a --project=$$PROJECT_ID >/dev/null 2>&1; then \
+			echo "$(YELLOW)📥 Importing GKE cluster...$(NC)"; \
+			terraform import google_container_cluster.cluster $$PROJECT_ID/us-central1-a/munshi-cluster 2>/dev/null || true; \
+			IMPORTS_DONE=$$((IMPORTS_DONE + 1)); \
+		fi && \
+		if gcloud artifacts repositories describe munshi-containers --location=us-central1 --project=$$PROJECT_ID >/dev/null 2>&1; then \
+			echo "$(YELLOW)📥 Importing Artifact Registry...$(NC)"; \
+			terraform import google_artifact_registry_repository.registry projects/$$PROJECT_ID/locations/us-central1/repositories/munshi-containers 2>/dev/null || true; \
+			IMPORTS_DONE=$$((IMPORTS_DONE + 1)); \
+		fi && \
+		if [ $$IMPORTS_DONE -gt 0 ]; then \
+			echo "$(GREEN)✓ Imported $$IMPORTS_DONE existing resources$(NC)"; \
+		else \
+			echo "$(BLUE)ℹ️  No existing resources to import$(NC)"; \
+		fi

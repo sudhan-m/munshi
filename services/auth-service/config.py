@@ -7,16 +7,85 @@ for infrastructure and secrets.
 """
 
 import os
-import sys
+import json
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-# Add the services directory to the Python path
-services_dir = Path(__file__).parent.parent
-if str(services_dir) not in sys.path:
-    sys.path.insert(0, str(services_dir))
 
-from shared.config.config_loader import get_config
+class SimpleConfigLoader:
+    """Simple configuration loader for auth service."""
+    
+    def __init__(self, service_name: str, service_dir: str):
+        self.service_name = service_name
+        self.service_dir = service_dir
+        self.config_data = self._load_config()
+    
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from config.json file."""
+        config_file = Path(self.service_dir) / "config.json"
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                return json.load(f)
+        return {}
+    
+    def get_service_config(self) -> Dict[str, Any]:
+        return self.config_data.get("service", {})
+    
+    def get_jwt_config(self) -> Dict[str, Any]:
+        jwt_config = self.config_data.get("jwt", {})
+        # Override secret from environment
+        jwt_config["secret_key"] = os.getenv("JWT_SECRET", jwt_config.get("secret_key", "dev-secret"))
+        return jwt_config
+    
+    def get_logging_config(self) -> Dict[str, Any]:
+        return self.config_data.get("logging", {})
+    
+    def get_cors_config(self) -> Dict[str, Any]:
+        return self.config_data.get("cors", {})
+    
+    def get_rate_limit_config(self) -> Dict[str, Any]:
+        return self.config_data.get("rate_limiting", {})
+    
+    def get_host_port(self) -> tuple:
+        host = os.getenv("AUTH_SERVICE_HOST", "0.0.0.0")
+        port_env = os.getenv("AUTH_SERVICE_PORT", "8001")
+        # Handle Kubernetes service environment variable format (tcp://host:port)
+        if port_env.startswith("tcp://"):
+            port = int(port_env.split(":")[-1])
+        else:
+            port = int(port_env)
+        return host, port
+    
+    def get_environment(self) -> str:
+        return os.getenv("ENVIRONMENT", "development")
+    
+    def is_debug(self) -> bool:
+        return os.getenv("DEBUG", "false").lower() == "true"
+    
+    def get_database_url(self, db_type: str) -> str:
+        return os.getenv("DATABASE_URL", "")
+    
+    def get_redis_url(self, redis_type: str) -> str:
+        return os.getenv("REDIS_URL", "")
+    
+    def get(self, key: str, default: Any = None, env_var: str = None) -> Any:
+        """Get config value with fallback to environment variable."""
+        if env_var and os.getenv(env_var):
+            return os.getenv(env_var)
+        
+        keys = key.split('.')
+        value = self.config_data
+        for k in keys:
+            if isinstance(value, dict) and k in value:
+                value = value[k]
+            else:
+                return default
+        return value
+
+
+def get_config(service_name: str, service_dir: str) -> SimpleConfigLoader:
+    """Get configuration loader for service."""
+    return SimpleConfigLoader(service_name, service_dir)
 
 
 class AuthServiceSettings:

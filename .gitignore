@@ -135,6 +135,8 @@ poetry.lock
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
+terraform.tfvars
+terraform.tfvars.json
 
 # Redis dumps
 dump.rdb

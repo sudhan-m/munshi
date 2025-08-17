@@ -55,3 +55,43 @@ variable "use_spot_instances" {
   type        = bool
   default     = true
 }
+
+# Optional Components
+variable "enable_cert_manager" {
+  description = "Enable cert-manager for TLS certificate management"
+  type        = bool
+  default     = false
+}
+
+variable "enable_ingress_nginx" {
+  description = "Enable NGINX ingress controller"
+  type        = bool
+  default     = false
+}
+
+variable "deployment_timeout" {
+  description = "Timeout for Helm deployments in seconds"
+  type        = number
+  default     = 300
+}
+
+# Database Configuration
+variable "enable_database_init" {
+  description = "Enable automatic database initialization"
+  type        = bool
+  default     = true
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL admin password"
+  type        = string
+  default     = "postgres123"
+  sensitive   = true
+}
+
+variable "munshi_db_password" {
+  description = "Password for munshi database user"
+  type        = string
+  default     = "munshi_password"
+  sensitive   = true
+}

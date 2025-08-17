@@ -315,9 +315,16 @@ async def analyze_bandit_strategy(request: BanditStrategyRequest):
         return BanditStrategyResponse(success=False, error=str(e))
 
 if __name__ == "__main__":
+    port_env = os.getenv("LLM_SERVICE_PORT", "8005")
+    # Handle Kubernetes service environment variable format (tcp://host:port)
+    if port_env.startswith("tcp://"):
+        port = int(port_env.split(":")[-1])
+    else:
+        port = int(port_env)
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("LLM_SERVICE_PORT", 8005)),
+        port=port,
         reload=True
     )

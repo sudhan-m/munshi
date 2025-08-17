@@ -1,8 +1,21 @@
+# Additional dependencies for HuggingFace base image
+# (torch and transformers already included in base image)
+
+# Web framework
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
-torch>=2.0.0
-transformers>=4.30.0
-librosa>=0.10.0
+
+# Audio processing
+librosa==0.10.0
+soundfile==0.12.1
+
+# Core utilities
 python-dotenv==1.0.0
+google-cloud-storage==2.10.0
+psutil==5.9.0
+requests==2.31.0
+
+# Fix NumPy compatibility issue
+numpy<2.0

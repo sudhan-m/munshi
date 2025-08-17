@@ -9,7 +9,7 @@ image:
   registry: docker.io
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: ""
+  tag: "latest"
 
 # Service account configuration
 serviceAccount:
@@ -172,8 +172,8 @@ services:
     image:
       repository: munshi/conversation-service
       tag: latest
-    port: 8005
-    targetPort: 8005
+    port: 8007
+    targetPort: 8007
     replicas: 2
     resources:
       limits:
@@ -183,11 +183,16 @@ services:
         cpu: 100m
         memory: 128Mi
     env:
-      - name: DATABASE_URL
+      - name: MONGODB_URL
         valueFrom:
           secretKeyRef:
             name: database-credentials
-            key: conversation-db-url
+            key: mongodb_url
+      - name: GOOGLE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: google-api-keys
+            key: api-key
 
   # LLM Service
   llmService:
@@ -196,8 +201,8 @@ services:
     image:
       repository: munshi/llm-service
       tag: latest
-    port: 8006
-    targetPort: 8006
+    port: 8005
+    targetPort: 8005
     replicas: 2
     resources:
       limits:
@@ -210,13 +215,8 @@ services:
       - name: GOOGLE_API_KEY
         valueFrom:
           secretKeyRef:
-            name: llm-secrets
-            key: google-api-key
-      - name: OPENAI_API_KEY
-        valueFrom:
-          secretKeyRef:
-            name: llm-secrets
-            key: openai-api-key
+            name: google-api-keys
+            key: api-key
 
   # Pronunciation Evaluator
   pronunciationEvaluator:
@@ -225,8 +225,8 @@ services:
     image:
       repository: munshi/pronunciation-evaluator
       tag: latest
-    port: 8007
-    targetPort: 8007
+    port: 8006
+    targetPort: 8006
     replicas: 2
     resources:
       limits:
@@ -271,6 +271,21 @@ postgresql:
       size: 8Gi
   architecture: standalone
 
+# MongoDB configuration
+mongodb:
+  enabled: true
+  auth:
+    enabled: true
+    rootUser: "root"
+    rootPassword: "mongodb123"
+    usernames: ["munshi"]
+    passwords: ["munshi123"]
+    databases: ["munshi"]
+  persistence:
+    enabled: true
+    size: 8Gi
+  architecture: standalone
+
 # Redis configuration
 redis:
   enabled: true
@@ -293,9 +308,15 @@ secrets:
   databaseCredentials:
     type: Opaque
     data:
+      # PostgreSQL connections to local deployment
       auth-db-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzMTIzQHBvc3RncmVzcWwtcHJpbWFyeTo1NDMyL211bnNoaV9hdXRo
       audio-db-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzMTIzQHBvc3RncmVzcWwtcHJpbWFyeTo1NDMyL211bnNoaV9hdWRpbw==
       conversation-db-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzMTIzQHBvc3RncmVzcWwtcHJpbWFyeTo1NDMyL211bnNoaV9jb252ZXJzYXRpb24=
+      # MongoDB connection to local deployment  
+      mongodb_url: bW9uZ29kYjovL211bnNoaTptdW5zaGkxMjNAbW9uZ29kYi1wcmltYXJ5OjI3MDE3L211bnNoaQ==
+      mongodb_database: bXVuc2hp
+      mongodb_username: bXVuc2hp
+      mongodb_password: bXVuc2hpMTIz
       
   redisCredentials:
     type: Opaque
@@ -307,11 +328,10 @@ secrets:
     data:
       jwt-secret: bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLXByb2R1Y3Rpb24=
       
-  llmSecrets:
+  googleApiKeys:
     type: Opaque
     data:
-      google-api-key: ""  # Should be set during deployment
-      openai-api-key: ""  # Should be set during deployment
+      api-key: ""  # Should be set during deployment
 
 # Health checks
 healthChecks:

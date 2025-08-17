@@ -81,10 +81,40 @@
       "Bash(GOOGLE_API_KEY=\"AIzaSyAdRWlckbMxq5-EayjY3OAn-PVt4EOTLf4\" python -c \"\nimport sys\nimport os\nsys.path.append(''.'')\nprint(f''Testing Gemini integration...'')\nprint(f''API Key set: {bool(os.getenv(\"\"GOOGLE_API_KEY\"\"))}'')\n\ntry:\n    from main import llm_service, GOOGLE_API_KEY\n    print(f''✅ Google API Key configured: {bool(GOOGLE_API_KEY)}'')\n    print(f''✅ LLM Service initialized successfully'')\n    print(''🎉 Gemini integration test passed!'')\nexcept Exception as e:\n    print(f''❌ Error: {e}'')\n    import traceback\n    traceback.print_exc()\n    sys.exit(1)\n\")",
       "Bash(gcloud components install:*)",
       "Bash(gcloud container clusters get-credentials:*)",
-      "Bash(gcloud container clusters:*)"
+      "Bash(gcloud container clusters:*)",
+      "Bash(gcloud auth:*)",
+      "Bash(gcloud config:*)",
+      "Bash(gcloud services enable:*)",
+      "Bash(terraform:*)",
+      "Bash(export TF_VAR_mongodb_url=\"mongodb://localhost:27017\")",
+      "Bash(export TF_VAR_mongodb_username=\"munshi_user\")",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-llm-service:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-asr-service:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-pronunciation-evaluator:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-audio-service:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-ui-service:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-auth-service:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -f services/auth-service/Dockerfile -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-auth-service:latest .)",
+      "Bash(helm dependency:*)",
+      "Bash(gcloud projects add-iam-policy-binding:*)",
+      "Bash(gcloud artifacts repositories describe:*)",
+      "Bash(gcloud artifacts docker images list:*)",
+      "Bash(gcloud iam service-accounts keys create:*)",
+      "Bash(./infrastructure/quick-deploy.sh)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-conversation-service:latest .)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -f auth-service/Dockerfile -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-auth-service:latest .)",
+      "Bash(kubectl set image:*)",
+      "Bash(DOCKER_BUILDKIT=0 docker build -t us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-pronunciation-evaluator:latest services/pronunciation-evaluator/)",
+      "Bash(kubectl scale:*)",
+      "Bash(helm repo:*)",
+      "Bash(gcloud:*)"
     ],
     "deny": [],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "/Users/sudhan/Documents",
+      "/Users/sudhan"
+    ]
   },
   "documentation_standards": {
     "mermaid_github_compatibility": {

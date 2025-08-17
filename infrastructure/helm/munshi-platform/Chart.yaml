@@ -19,6 +19,7 @@ home: https://github.com/munshi/munshi-platform
 sources:
   - https://github.com/munshi/munshi-platform
 
+# Dependencies for complete platform deployment
 dependencies:
   - name: redis
     version: 17.11.3
@@ -28,7 +29,7 @@ dependencies:
     version: 12.5.8
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
-  - name: cert-manager
-    version: v1.13.1
-    repository: https://charts.jetstack.io
-    condition: certManager.install
+  - name: mongodb
+    version: 13.15.1
+    repository: https://charts.bitnami.com/bitnami
+    condition: mongodb.enabled

@@ -6,6 +6,19 @@ __pycache__/
 # C extensions
 *.so
 
+# Development artifacts
+*.log
+.DS_Store
+mock-*
+*-dockerfile
+tfplan
+terraform.tfstate*
+.terraform/
+
+# Temporary files
+*.tmp
+*.temp
+
 # Distribution / packaging
 .Python
 build/

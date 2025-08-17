@@ -9,14 +9,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY auth-service/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY auth-service/ .
+COPY . .
 
-# Copy shared modules
-COPY shared/ ./shared
+# Create shared directory (not used in current implementation)
 
 # Create logs directory
 RUN mkdir -p logs

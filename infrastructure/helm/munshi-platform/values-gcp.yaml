@@ -1,0 +1,311 @@
+# GCP-specific Helm values for Munshi Platform
+# This file overrides default values.yaml for GCP Artifact Registry deployment
+
+# Global configuration
+global:
+  imageRegistry: "us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers"
+  imagePullSecrets:
+    - name: artifact-registry-creds
+
+# Image configuration
+image:
+  registry: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers
+  pullPolicy: Always
+  tag: "latest"
+
+# Services configuration with GCP registry
+services:
+  # Auth Service
+  authService:
+    enabled: true
+    name: auth-service
+    image:
+      repository: munshi-auth-service
+      tag: latest
+    port: 8001
+    targetPort: 8001
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+    env:
+      - name: DATABASE_URL
+        value: "postgresql://munshi_user:munshi_password@postgresql:5432/munshi_auth"
+      - name: JWT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: jwt-secret
+            key: secret
+
+  # Audio Service
+  audioService:
+    enabled: true
+    name: audio-service
+    image:
+      repository: munshi-audio-service
+      tag: latest
+    port: 8003
+    targetPort: 8003
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 200m
+        memory: 256Mi
+
+  # ASR Service
+  asrService:
+    enabled: true
+    name: asr-service
+    image:
+      repository: munshi-asr-service
+      tag: latest
+    port: 8004
+    targetPort: 8004
+    replicas: 1
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 6Gi
+        nvidia.com/gpu: 1
+      requests:
+        cpu: 1000m
+        memory: 4Gi
+        nvidia.com/gpu: 1
+    nodeSelector:
+      cloud.google.com/gke-accelerator: nvidia-tesla-t4
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    env:
+      - name: CLOUD_RUN_MODE
+        value: "false"
+      - name: GPU_SUPPORT
+        value: "cuda"
+      - name: MODEL_CACHE_SIZE
+        value: "3"
+      - name: CUDA_VISIBLE_DEVICES
+        value: "0"
+
+  # Conversation Service
+  conversationService:
+    enabled: true
+    name: conversation-service
+    image:
+      repository: munshi-conversation-service
+      tag: latest
+    port: 8007
+    targetPort: 8007
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+    env:
+      - name: MONGODB_URL
+        valueFrom:
+          secretKeyRef:
+            name: database-credentials
+            key: mongodb_url
+      - name: GOOGLE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: google-api-keys
+            key: api-key
+
+  # LLM Service
+  llmService:
+    enabled: true
+    name: llm-service
+    image:
+      repository: munshi-llm-service
+      tag: latest
+    port: 8005
+    targetPort: 8005
+    replicas: 2
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    env:
+      - name: GOOGLE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: google-api-keys
+            key: api-key
+
+  # Pronunciation Evaluator
+  pronunciationEvaluator:
+    enabled: true
+    name: pronunciation-evaluator
+    image:
+      repository: munshi-pronunciation-evaluator
+      tag: latest
+    port: 8006
+    targetPort: 8006
+    replicas: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+  # UI Service
+  uiService:
+    enabled: true
+    name: ui-service
+    image:
+      repository: munshi-ui-service
+      tag: latest
+    port: 8002
+    targetPort: 8002
+    replicas: 2
+    resources:
+      limits:
+        cpu: 300m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    env:
+      - name: AUTH_SERVICE_URL
+        value: "http://auth-service:8001"
+      - name: AUDIO_SERVICE_URL
+        value: "http://audio-service:8003"
+
+# Database configuration for GCP
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "postgres123"
+    database: "munshi"
+    username: "munshi_user"
+    password: "munshi_password"
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: "standard-rwo"
+    nodeSelector:
+      workload-type: "database"
+    tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "database"
+        effect: "NoSchedule"
+  architecture: standalone
+
+# MongoDB configuration for GCP
+mongodb:
+  enabled: true
+  auth:
+    enabled: true
+    rootUser: "root"
+    rootPassword: "mongodb123"
+    usernames: ["munshi"]
+    passwords: ["munshi123"]
+    databases: ["munshi"]
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: "standard-rwo"
+  nodeSelector:
+    workload-type: "database"
+  tolerations:
+    - key: "workload-type"
+      operator: "Equal"
+      value: "database"
+      effect: "NoSchedule"
+  architecture: standalone
+
+# Redis configuration for GCP
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "redis123"
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: "standard-rwo"
+    nodeSelector:
+      workload-type: "database"
+    tolerations:
+      - key: "workload-type"
+        operator: "Equal"
+        value: "database"
+        effect: "NoSchedule"
+
+# Ingress configuration for GCP
+ingress:
+  enabled: true
+  className: "gce"
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: "munshi-ip"
+    networking.gke.io/managed-certificates: "munshi-ssl-cert"
+    kubernetes.io/ingress.allow-http: "true"
+  hosts:
+    - host: munshi.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: munshi-tls
+      hosts:
+        - munshi.example.com
+
+# Environment-specific overrides
+environment: production
+
+# Resource quotas for GCP
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network Policies for GCP
+networkPolicy:
+  enabled: false
+
+# Monitoring for GCP
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    labels:
+      app: munshi-platform
+    interval: 30s
+    scrapeTimeout: 10s

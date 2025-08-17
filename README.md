@@ -1,6 +1,23 @@
 # Munshi AI Language Learning Platform
 
-A comprehensive AI-powered language learning platform with conversational pronunciation training. Features advanced microservices architecture with GPU-optimized speech recognition, LLM integration, and real-time pronunciation evaluation.
+🎯 **AI-powered pronunciation training platform** with GPU-optimized speech recognition, LLM integration, and real-time evaluation.
+
+## 🚀 Quick Deploy
+
+```bash
+# 1. Bootstrap (creates config files)
+make bootstrap
+
+# 2. Edit configuration  
+# Edit infrastructure/terraform/terraform.tfvars with your GCP project and API keys
+
+# 3. Deploy (5 minutes)
+make deploy
+```
+
+**That's it!** Complete platform deployed with 54% cost savings via spot instances.
+
+👉 **[Full Deployment Guide](DEPLOY.md)**
 
 ## 🏗️ Architecture
 

@@ -1,26 +1,53 @@
-# Munshi Platform - Simple Deployment Guide
+# Munshi Platform - Deployment Guide
 
-## Quick Start (3 minutes)
+## Prerequisites
+
+### Required Tools
+- **Google Cloud SDK**: `gcloud` CLI authenticated with your GCP account
+- **Docker**: For building container images
+- **Terraform**: Infrastructure as Code tool (v1.0+)
+- **kubectl**: Kubernetes CLI
+- **Helm**: Kubernetes package manager (v3+)
+
+### Get a Google Gemini API Key
+1. Visit: https://aistudio.google.com/apikey
+2. Create a new API key (starts with "AIza")
+3. Save it for configuration below
+
+## Quick Start
 
 ### 1. Initialize Configuration
 ```bash
-# Create terraform.tfvars file
+# Create terraform.tfvars from template
 make init
 ```
 
 ### 2. Edit Configuration
-```bash
-# Edit infrastructure/terraform/terraform.tfvars with your values:
-# - project_id: Your GCP project ID  
-# - jwt_secret: Random 32-character string
-# - google_api_key: Your Google Gemini API key
+Edit `infrastructure/terraform/terraform.tfvars` with your values:
+
+```hcl
+project_id      = "your-gcp-project-id"
+google_api_key  = "AIzaSy..."  # From Google AI Studio
+jwt_secret      = "your-random-32-char-secret"  # Optional - auto-generated if not set
 ```
+
+**Important**:
+- Your Gemini API key must start with `AIza` (get from https://aistudio.google.com/apikey)
+- JWT secret will be auto-generated if not provided
 
 ### 3. Create Infrastructure
 ```bash
-# Create GCP cluster and node pools (one-time setup)
+# Create GKE cluster and node pools (one-time setup, ~5-10 minutes)
 make env-init
 ```
+
+This command:
+- ✅ Creates GKE cluster with 4 specialized node pools
+- ✅ Sets up Artifact Registry for Docker images
+- ✅ Configures Cloud Storage for ML models
+- ✅ Enables required GCP APIs
+- ✅ Uses spot instances for 54% cost savings
+- ✅ **Idempotent**: Safe to run multiple times (skips existing resources)
 
 ### 4. Deploy Application
 ```bash
@@ -28,9 +55,31 @@ make env-init
 make deploy
 ```
 
-The deployment process:
-- ✅ **env-init**: Creates GKE cluster with optimized node pools, Artifact Registry, and APIs (54% cost savings with spot instances)
-- ✅ **deploy**: Builds images, pushes to registry, and deploys all services with Helm
+This command:
+- ✅ Smart builds only changed services (saves time!)
+- ✅ Pushes images to Artifact Registry
+- ✅ Creates Kubernetes secrets
+- ✅ Deploys with Helm (databases + 7 microservices)
+- ✅ Sets up LoadBalancer for external access
+- ✅ **Idempotent**: Safe to run after code changes
+
+## Deployment Workflow
+
+**For fresh deployment:**
+```bash
+make init        # 1. Create config file
+# Edit terraform.tfvars
+make env-init    # 2. Create infrastructure (one-time)
+make deploy      # 3. Deploy application
+```
+
+**For code updates:**
+```bash
+# Just redeploy - smart-deploy only builds changed services
+make deploy
+```
+
+**The two-step workflow (`make env-init` + `make deploy`) is the recommended approach.**
 
 ## What Gets Deployed
 
@@ -123,19 +172,23 @@ make takedown
 
 # Destroy everything (WARNING: Deletes all infrastructure)
 make destroy
-
-# Rebuild infrastructure (destroy + recreate)
-make destroy && make env-init
 ```
 
 ### Hassle-Free Infrastructure Management
 
-The updated commands handle common issues automatically:
+The deployment commands handle common issues automatically:
 
 **`make env-init`**:
 - ✅ Detects existing clusters and imports them into Terraform state
 - ✅ Creates missing node pools and infrastructure
 - ✅ Handles state synchronization automatically
+- ✅ Skips infrastructure creation if cluster already exists
+
+**`make deploy`**:
+- ✅ Smart-deploy only builds changed services (git diff)
+- ✅ Handles existing namespaces and secrets gracefully
+- ✅ Retries failed operations automatically
+- ✅ Cleans up problematic pods before deployment
 
 **`make destroy`**:
 - ✅ Imports existing clusters before destroying (prevents state issues)
@@ -143,29 +196,39 @@ The updated commands handle common issues automatically:
 - ✅ Falls back to manual cleanup if Terraform fails
 - ✅ Ensures complete infrastructure removal
 
-## Advanced Configuration
+## Advanced Usage
 
-### Environment Variables
-Set these before deployment to override defaults:
+### Update Secrets
+
+**Update Gemini API Key:**
 ```bash
-export PROJECT_ID="my-project"
-export CLUSTER_NAME="my-cluster"  
-export REGION="us-west1"
-export NAMESPACE="munshi-staging"
+kubectl create secret generic google-api-keys \
+  --from-literal=api-key="AIzaSyNEW_KEY_HERE" \
+  -n munshi-prod --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl rollout restart deployment/llm-service -n munshi-prod
 ```
 
-### Update Application Code
-Rebuild and redeploy after code changes:
+**Update JWT Secret:**
 ```bash
-make redeploy
+kubectl create secret generic jwt-secret \
+  --from-literal=secret="$(openssl rand -base64 32)" \
+  -n munshi-prod --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl rollout restart deployment/auth-service -n munshi-prod
 ```
 
-### Individual Commands
+### Individual Build Commands
 ```bash
-make build    # Build all images
-make push     # Push to registry  
-make deploy   # Deploy to GCP
+make build       # Build all images (rebuilds everything - slow)
+make push        # Push all images to registry
+make deploy      # Deploy to GCP (uses smart-deploy by default)
+make rebuild-all # Force rebuild all services (build + push)
 ```
+
+**Notes**:
+- `make deploy` uses smart-deploy automatically (only builds changed services)
+- Use `make rebuild-all && make deploy` to force rebuild everything
 
 ### Scaling
 ```bash

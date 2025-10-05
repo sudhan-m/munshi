@@ -162,8 +162,11 @@ services:
         value: "cpu"
       - name: MODEL_CACHE_SIZE
         value: "3"
-    nodeSelector:
-      node-type: cpu-intensive
+      - name: MODEL_STORAGE_BUCKET
+        value: "munshi-models"
+      - name: MODEL_CACHE_DIR
+        value: "/tmp/model_cache"
+    nodeSelector: {}
 
   # Conversation Service
   conversationService:
@@ -299,13 +302,13 @@ redis:
 
 # ConfigMaps
 configMaps:
-  storageConfig:
+  storage-config:
     data:
       audio-bucket: "munshi-audio-files"
       
 # Secrets (these should be created separately in production)
 secrets:
-  databaseCredentials:
+  database-credentials:
     type: Opaque
     data:
       # PostgreSQL connections to local deployment
@@ -318,17 +321,17 @@ secrets:
       mongodb_username: bXVuc2hp
       mongodb_password: bXVuc2hpMTIz
       
-  redisCredentials:
+  redis-credentials:
     type: Opaque
     data:
       redis-url: cmVkaXM6Ly86cmVkaXMxMjNAcmVkaXMtbWFzdGVyOjYzNzk=
       
-  authSecrets:
+  auth-secrets:
     type: Opaque
     data:
       jwt-secret: bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLXByb2R1Y3Rpb24=
       
-  googleApiKeys:
+  google-api-keys:
     type: Opaque
     data:
       api-key: ""  # Should be set during deployment
@@ -388,7 +391,7 @@ logging:
 
 # Cert-manager configuration
 certManager:
-  enabled: true
+  enabled: false
   install: false  # Set to true if you want to install cert-manager as part of this chart
   email: admin@munshi.dev
 

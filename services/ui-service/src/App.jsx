@@ -34,35 +34,36 @@ function PublicRoute({ children }) {
 }
 
 function App() {
+  console.log('Munshi UI v2.0 - 2025-10-05')
   return (
     <AuthProvider>
       <Router>
         <div className="min-h-screen bg-dark-950">
           <Routes>
             <Route path="/" element={<Navigate to="/chat" replace />} />
-            <Route 
-              path="/login" 
+            <Route
+              path="/login"
               element={
                 <PublicRoute>
                   <Login />
                 </PublicRoute>
-              } 
+              }
             />
-            <Route 
-              path="/register" 
+            <Route
+              path="/register"
               element={
                 <PublicRoute>
                   <Register />
                 </PublicRoute>
-              } 
+              }
             />
-            <Route 
-              path="/chat" 
+            <Route
+              path="/chat"
               element={
                 <ProtectedRoute>
                   <ChatInterface />
                 </ProtectedRoute>
-              } 
+              }
             />
           </Routes>
         </div>

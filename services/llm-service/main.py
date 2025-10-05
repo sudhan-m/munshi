@@ -47,11 +47,62 @@ genai.configure(api_key=GOOGLE_API_KEY)
 
 class LLMService:
     """LLM service wrapper for Google Gemini API"""
-    
+
     def __init__(self):
         # Use the correct model name for the API version
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
-        print(f"✓ Google Gemini LLM service initialized")
+        # Configure safety settings to be more permissive for language learning content
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+        ]
+        self.model = genai.GenerativeModel('gemini-2.5-pro', safety_settings=safety_settings)
+        print(f"✓ Google Gemini LLM service initialized with gemini-2.5-pro")
+
+    def _extract_text_from_response(self, response) -> str:
+        """Safely extract text from Gemini response, handling different response structures."""
+        try:
+            # Try the simple text accessor first
+            return response.text
+        except (ValueError, AttributeError) as e:
+            # Fall back to parts accessor
+            try:
+                if response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    finish_reason = candidate.finish_reason if hasattr(candidate, 'finish_reason') else None
+
+                    # finish_reason: 1=STOP (normal), 2=MAX_TOKENS, 3=SAFETY, 4=RECITATION, 5=OTHER
+                    if finish_reason == 3:  # SAFETY
+                        print(f"Warning: Response blocked by safety filters")
+                        if hasattr(candidate, 'safety_ratings'):
+                            print(f"Safety ratings: {candidate.safety_ratings}")
+                        return "[Content blocked by safety filters]"
+
+                    # Debug: print candidate structure
+                    print(f"Debug: finish_reason={finish_reason}, candidate={candidate}")
+
+                    if candidate.content:
+                        # Check if parts exist and have length (protobuf RepeatedComposite may be empty)
+                        if hasattr(candidate.content, 'parts') and len(candidate.content.parts) > 0:
+                            text_parts = []
+                            for part in candidate.content.parts:
+                                if hasattr(part, 'text'):
+                                    text_parts.append(part.text)
+                            result = "".join(text_parts)
+                            if result:
+                                return result
+                        # Try direct text access on content
+                        if hasattr(candidate.content, 'text'):
+                            return candidate.content.text
+
+                    print(f"Warning: Could not extract text. finish_reason={finish_reason}, parts_len={len(candidate.content.parts) if (candidate.content and hasattr(candidate.content, 'parts')) else 0}")
+            except Exception as ex:
+                print(f"Error extracting from parts: {ex}")
+                import traceback
+                print(traceback.format_exc())
+            # Last resort - return empty string
+            return ""
     
     async def generate_conversation_response(self, user_message: str, context: List[dict], language: str) -> str:
         """Generate conversation response for language learning"""
@@ -64,30 +115,142 @@ class LLMService:
                 for msg in context[-5:]  # Last 5 exchanges
             ])
         
-        prompt = f"""You are a friendly language learning assistant helping users practice {language}. 
-        
+        # Check if user is requesting practice
+        is_practice_request = any(keyword in user_message.lower() for keyword in [
+            'practice', 'sentence', 'try', 'learn', 'teach me', 'generate'
+        ])
+
+        if is_practice_request:
+            # Generate single practice sentence with few-shot examples
+            if language == "Malayalam":
+                examples = """Example 1:
+{"type": "practice", "sentence": "എനിക്ക് വെള്ളം വേണം", "romanized": "Enikku vellam venam", "translation": "I want water"}
+
+Example 2:
+{"type": "practice", "sentence": "നിങ്ങളുടെ പേര് എന്താണ്?", "romanized": "Ningalude peru enthanu?", "translation": "What is your name?"}
+
+Example 3:
+{"type": "practice", "sentence": "ഇത് വളരെ നല്ലതാണ്", "romanized": "Ithu valare nallathanu", "translation": "This is very good"}
+
+Example 4:
+{"type": "practice", "sentence": "ഞാൻ മലയാളം പഠിക്കുന്നു", "romanized": "Njan Malayalam padikkunnu", "translation": "I am learning Malayalam"}"""
+            elif language == "Tamil":
+                examples = """Example 1:
+{"type": "practice", "sentence": "எனக்கு தண்ணீர் வேண்டும்", "romanized": "Enakku thanneer vendum", "translation": "I want water"}
+
+Example 2:
+{"type": "practice", "sentence": "உங்கள் பெயர் என்ன?", "romanized": "Ungal peyar enna?", "translation": "What is your name?"}
+
+Example 3:
+{"type": "practice", "sentence": "இது மிகவும் நல்லது", "romanized": "Idhu migavum nalladhu", "translation": "This is very good"}"""
+            elif language == "Hindi":
+                examples = """Example 1:
+{"type": "practice", "sentence": "मुझे पानी चाहिए", "romanized": "Mujhe paani chahiye", "translation": "I want water"}
+
+Example 2:
+{"type": "practice", "sentence": "आपका नाम क्या है?", "romanized": "Aapka naam kya hai?", "translation": "What is your name?"}
+
+Example 3:
+{"type": "practice", "sentence": "यह बहुत अच्छा है", "romanized": "Yeh bahut accha hai", "translation": "This is very good"}"""
+            else:
+                examples = """Example 1:
+{"type": "practice", "sentence": "I want water", "romanized": "I want water", "translation": "I want water"}"""
+
+            prompt = f"""You are generating practice sentences for {language} language learners.
+
+CRITICAL RULES:
+1. Sentence MUST be in {language} script (NOT English/Latin alphabet)
+2. Follow the EXACT JSON format from examples below
+3. Return ONLY valid JSON with no markdown, no code blocks, no explanations
+
+Here are correct examples for {language}:
+
+{examples}
+
+Now generate ONE NEW practice sentence in {language} following the EXACT same format as above:"""
+        else:
+            # Regular conversation
+            prompt = f"""You are a friendly language learning assistant helping users practice {language}.
+
 Previous conversation:
 {context_str}
 
 Current user message: {user_message}
 
-Respond helpfully and encourage language practice. If the user wants to practice pronunciation:
-1. Provide a sentence in {language} appropriate for their level
-2. If applicable, provide romanized version for Tamil/Malayalam
-3. Be encouraging and supportive
-
-Keep responses conversational and engaging."""
+Respond conversationally and supportively. If appropriate, offer to provide practice sentences."""
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=500,
-                    temperature=0.7,
-                )
-            )
-            return response.text
+            import re
+            import json as json_module
+
+            # Try up to 3 times for practice requests
+            max_retries = 3 if is_practice_request else 1
+
+            for attempt in range(max_retries):
+                response = self.model.generate_content(prompt)
+                extracted_text = self._extract_text_from_response(response)
+
+                if not extracted_text:
+                    print(f"Warning: Empty response from Gemini (attempt {attempt + 1})")
+                    continue
+
+                # Clean JSON if it has markdown code blocks or extra text
+                if is_practice_request:
+                    # Remove markdown code blocks
+                    cleaned = extracted_text.strip()
+                    if cleaned.startswith('```'):
+                        cleaned = cleaned.split('\n', 1)[1] if '\n' in cleaned else cleaned[3:]
+                    if cleaned.endswith('```'):
+                        cleaned = cleaned.rsplit('\n', 1)[0] if '\n' in cleaned else cleaned[:-3]
+                    cleaned = cleaned.strip()
+
+                    # Find JSON object
+                    json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+                    if json_match:
+                        cleaned = json_match.group(0)
+
+                    # Validate the response
+                    try:
+                        parsed = json_module.loads(cleaned)
+                        sentence = parsed.get('sentence', '')
+
+                        print(f"DEBUG: language='{language}', sentence='{sentence}'")
+
+                        # Check if sentence contains non-Latin script for non-English languages
+                        validation_passed = True
+                        if language != "English":
+                            # Malayalam Unicode range: 0D00-0D7F
+                            # Tamil Unicode range: 0B80-0BFF
+                            # Hindi/Devanagari Unicode range: 0900-097F
+                            has_native_script = bool(re.search(r'[\u0900-\u097F\u0B80-\u0BFF\u0D00-\u0D7F]', sentence))
+
+                            if not has_native_script:
+                                print(f"Validation FAILED (attempt {attempt + 1}/{max_retries}): No {language} script detected in '{sentence}'")
+                                validation_passed = False
+                                if attempt < max_retries - 1:
+                                    prompt = f"{prompt}\n\nPREVIOUS ATTEMPT WAS WRONG - it used English letters. You MUST use {language} script!"
+                                    continue
+                                else:
+                                    print(f"All retries exhausted. Failing request.")
+                                    return "I'm having trouble generating a Malayalam sentence. Please try again."
+
+                        if validation_passed:
+                            print(f"Validation PASSED: '{sentence}'")
+                            return cleaned
+                    except json_module.JSONDecodeError as e:
+                        print(f"JSON decode error (attempt {attempt + 1}): {e}")
+                        if attempt < max_retries - 1:
+                            continue
+
+                    return cleaned
+
+                return extracted_text
+
+            # If all retries failed
+            print(f"Warning: All {max_retries} attempts failed for practice request")
+            return "I'm having trouble generating a response right now. Please try again."
         except Exception as e:
+            print(f"Error in generate_conversation_response: {type(e).__name__}: {str(e)}")
             raise HTTPException(status_code=500, detail=f"LLM generation error: {str(e)}")
     
     async def transliterate_text(self, text: str, source_language: str) -> str:
@@ -110,14 +273,8 @@ Manglish:"""
             return text
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=200,
-                    temperature=0.3,
-                )
-            )
-            result = response.text.strip()
+            response = self.model.generate_content(prompt)
+            result = self._extract_text_from_response(response).strip()
             # Clean up the response
             result = result.split('\n')[0].strip()
             return result if result else text
@@ -166,18 +323,12 @@ Requirements:
 Respond with just the sentence in {language}."""
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=100,
-                    temperature=0.8,
-                )
-            )
-            sentence = response.text.strip()
-            
+            response = self.model.generate_content(prompt)
+            sentence = self._extract_text_from_response(response).strip()
+
             # Get romanized version if needed
             romanized = await self.transliterate_text(sentence, language)
-            
+
             return {
                 "original": sentence,
                 "romanized": romanized,
@@ -208,28 +359,16 @@ Generate an encouraging response that:
 Be warm, supportive, and specific to their performance."""
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=300,
-                    temperature=0.7,
-                )
-            )
-            return response.text
+            response = self.model.generate_content(prompt)
+            return self._extract_text_from_response(response)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Response generation error: {str(e)}")
-    
+
     async def analyze_bandit_strategy(self, prompt: str) -> str:
         """Analyze user context and recommend bandit strategy"""
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=50,
-                    temperature=0.3,
-                )
-            )
-            return response.text.strip()
+            response = self.model.generate_content(prompt)
+            return self._extract_text_from_response(response).strip()
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Strategy analysis error: {str(e)}")
 
@@ -240,10 +379,10 @@ llm_service = LLMService()
 async def health_check():
     """Health check endpoint."""
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "service": "llm-service",
         "provider": "Google Gemini",
-        "model": "gemini-1.5-flash",
+        "model": "gemini-2.5-pro",
         "api_key_configured": bool(GOOGLE_API_KEY)
     }
 
@@ -251,13 +390,16 @@ async def health_check():
 async def generate_conversation(request: ConversationRequest):
     """Generate conversation response for language learning."""
     try:
+        print(f"Received conversation request: {request.user_message[:50]}...")
         response_text = await llm_service.generate_conversation_response(
-            request.user_message, 
-            request.context, 
+            request.user_message,
+            request.context,
             request.language
         )
+        print(f"Generated response: {response_text[:100] if response_text else 'EMPTY'}")
         return ConversationResponse(success=True, response=response_text)
     except Exception as e:
+        print(f"Exception in conversation endpoint: {type(e).__name__}: {str(e)}")
         return ConversationResponse(success=False, error=str(e))
 
 @app.post("/transliterate", response_model=TransliterationResponse)
@@ -290,7 +432,11 @@ async def generate_practice_sentence(request: SentenceGenerationRequest):
         )
         return SentenceGenerationResponse(success=True, sentence_data=sentence_data)
     except Exception as e:
-        return SentenceGenerationResponse(success=False, error=str(e))
+        import traceback
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"Error in generate_practice_sentence: {error_msg}")
+        print(traceback.format_exc())
+        return SentenceGenerationResponse(success=False, error=error_msg)
 
 @app.post("/generate-response", response_model=ResponseGenerationResponse)
 async def generate_evaluation_response(request: ResponseGenerationRequest):

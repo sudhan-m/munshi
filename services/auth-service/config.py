@@ -32,16 +32,23 @@ class SimpleConfigLoader:
         return self.config_data.get("service", {})
     
     def get_jwt_config(self) -> Dict[str, Any]:
-        jwt_config = self.config_data.get("jwt", {})
+        jwt_config = self.config_data.get("security", {}).get("jwt", {})
         # Override secret from environment
         jwt_config["secret_key"] = os.getenv("JWT_SECRET", jwt_config.get("secret_key", "dev-secret"))
+        # Override access_token_expire_minutes from environment if set
+        if os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"):
+            jwt_config["access_token_expire_minutes"] = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
         return jwt_config
     
     def get_logging_config(self) -> Dict[str, Any]:
         return self.config_data.get("logging", {})
     
     def get_cors_config(self) -> Dict[str, Any]:
-        return self.config_data.get("cors", {})
+        cors_config = self.config_data.get("cors", {})
+        # Add default origins if not specified
+        if "origins" not in cors_config:
+            cors_config["origins"] = ["*"]
+        return cors_config
     
     def get_rate_limit_config(self) -> Dict[str, Any]:
         return self.config_data.get("rate_limiting", {})

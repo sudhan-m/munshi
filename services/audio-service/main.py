@@ -15,10 +15,15 @@ from typing import List, Optional
 import os
 from datetime import datetime
 import uuid
+import httpx
+import asyncio
 
 from database import connect_to_mongo, close_mongo_connection, get_audio_collection
 from storage import AudioStorage
 from models import AudioMetadata, AudioUploadResponse, AudioListResponse, AudioPlaybackResponse
+
+# ASR Service URL
+ASR_SERVICE_URL = os.getenv("ASR_SERVICE_URL", "http://asr-service:8004")
 
 app = FastAPI(
     title="Munshi Audio Service",
@@ -55,6 +60,73 @@ async def shutdown_event():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "audio-service"}
+
+
+@app.post("/audio/process")
+async def process_audio_for_asr(
+    file: UploadFile = File(...),
+    language: str = Form(default="Malayalam")
+):
+    """
+    Process audio file and send to ASR for transcription.
+    Handles GPU cold start with retry logic.
+
+    Args:
+        file: Audio file upload
+        language: Language for transcription (English, Tamil, Malayalam)
+
+    Returns:
+        JSON with transcription result
+    """
+    try:
+        # Read audio file content
+        file_content = await file.read()
+
+        # Retry logic for GPU cold start - ASR pods may be pending while GPU nodes scale up
+        max_retries = 6  # ~3 minutes total (5s + 10s + 20s + 40s + 60s + 60s)
+        retry_delays = [5, 10, 20, 40, 60, 60]  # Exponential backoff
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                # Send to ASR service for transcription
+                async with httpx.AsyncClient(timeout=120.0) as client:  # Longer timeout for cold start
+                    # ASR service expects 'audio' parameter name and 'language' form field
+                    files = {"audio": (file.filename or "recording.wav", file_content, file.content_type or "audio/wav")}
+                    data = {"language": language}
+                    response = await client.post(
+                        f"{ASR_SERVICE_URL}/transcribe",
+                        files=files,
+                        data=data
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        return {
+                            "transcription": result.get("transcription", ""),
+                            "language": result.get("language", ""),
+                            "confidence": result.get("confidence")
+                        }
+                    else:
+                        last_error = f"ASR service error: {response.status_code} - {response.text}"
+
+            except httpx.RequestError as e:
+                last_error = f"Connection error: {str(e)}"
+
+            # If not the last attempt, wait before retrying
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delays[attempt])
+
+        # All retries exhausted
+        raise HTTPException(
+            status_code=503,
+            detail=f"Speech recognition is starting up (GPU provisioning). This takes about 3 minutes on first use. Please try again in a moment. Last error: {last_error}"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing audio: {str(e)}")
 
 
 @app.post("/audio/record", response_model=AudioUploadResponse)
@@ -376,9 +448,18 @@ async def delete_recording(recording_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+    
+    # Handle Kubernetes auto-generated service environment variables
+    port_env = os.getenv("AUDIO_SERVICE_PORT", "8003")
+    if port_env.startswith("tcp://"):
+        # Extract port from Kubernetes service URL format: tcp://IP:PORT
+        port = int(port_env.split(":")[-1])
+    else:
+        port = int(port_env)
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("AUDIO_SERVICE_PORT", 8003)),
+        port=port,
         reload=True
     )

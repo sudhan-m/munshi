@@ -57,7 +57,7 @@ metadata:
   labels:
     {{- include "munshi-platform.serviceLabels" (dict "serviceName" "ui-service" "root" .) | nindent 4 }}
 spec:
-  type: ClusterIP
+  type: {{ .Values.services.uiService.serviceType | default "ClusterIP" }}
   ports:
     - port: {{ .Values.services.uiService.port }}
       targetPort: {{ .Values.services.uiService.targetPort }}

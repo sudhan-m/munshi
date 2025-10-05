@@ -5,6 +5,8 @@
 global:
   imageRegistry: ""
   imagePullSecrets: []
+  security:
+    allowInsecureImages: true
 
 # Image configuration
 image:
@@ -12,82 +14,87 @@ image:
   pullPolicy: Always
   tag: "latest"
 
-# Services configuration with GCP registry
+# Services configuration optimized for cost-effective packing
 services:
-  # Auth Service
+  # Auth Service - optimized for packing
   authService:
     enabled: true
     name: auth-service
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-auth-service
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-auth-service
       tag: latest
     port: 8001
     targetPort: 8001
-    replicas: 2
+    replicas: 1  # Reduced for cost savings
     resources:
       limits:
-        cpu: 300m
-        memory: 512Mi
+        cpu: 100m  # Ultra-minimal CPU
+        memory: 128Mi  # Bare minimum memory
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 25m   # Ultra-low request
+        memory: 64Mi   # Minimal memory
     env:
       - name: DATABASE_URL
         value: "postgresql://munshi_user:munshi_password@munshi-platform-postgresql:5432/munshi_auth"
       - name: JWT_SECRET
         valueFrom:
           secretKeyRef:
-            name: auth-secrets
-            key: jwt-secret
+            name: jwt-secret
+            key: secret
+      - name: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - name: REDIS_URL
+        value: "redis://:redis123@munshi-platform-redis-master:6379/0"
 
-  # Audio Service
+  # Audio Service - optimized for packing
   audioService:
     enabled: true
     name: audio-service
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-audio-service
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-audio-service
       tag: latest
     port: 8003
     targetPort: 8003
-    replicas: 2
+    replicas: 1  # Reduced for cost savings
     resources:
       limits:
-        cpu: 500m
-        memory: 512Mi
-      requests:
-        cpu: 200m
+        cpu: 200m  # Ultra-minimal for audio
         memory: 256Mi
+      requests:
+        cpu: 50m   # Ultra-low request
+        memory: 128Mi
 
-  # ASR Service  
+  # ASR Service - GPU enabled mode (billing upgraded)
   asrService:
     enabled: true
     name: asr-service
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-asr-service
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-asr-service
       tag: latest
     port: 8004
     targetPort: 8004
     replicas: 1
     resources:
       limits:
-        cpu: 500m
-        memory: 800Mi
+        cpu: 2000m           # Increased for GPU workload
+        memory: 8Gi          # Increased for GPU ASR models
+        nvidia.com/gpu: 1    # Request 1 GPU
       requests:
-        cpu: 200m
-        memory: 400Mi
+        cpu: 500m            # Higher request for GPU workload
+        memory: 4Gi          # Increased memory for GPU ASR models
+        nvidia.com/gpu: 1    # Request 1 GPU
+    # GPU enabled mode - restored GPU requirements
     nodeSelector:
-      cloud.google.com/gke-accelerator: nvidia-tesla-t4
+      workload-type: "gpu"
     tolerations:
       - key: nvidia.com/gpu
         operator: Exists
         effect: NoSchedule
     env:
       - name: GPU_SUPPORT
-        value: "auto"
+        value: "true"   # Re-enabled GPU support
       - name: MODEL_CACHE_SIZE
-        value: "3"
-      - name: CUDA_VISIBLE_DEVICES
-        value: "0"
+        value: "5"      # Increased cache size for GPU mode
       - name: MODEL_STORAGE_BUCKET
         valueFrom:
           configMapKeyRef:
@@ -99,52 +106,51 @@ services:
             name: model-storage-config
             key: cache-dir
 
-  # Conversation Service
+  # Conversation Service - optimized for packing
   conversationService:
     enabled: true
     name: conversation-service
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-conversation-service
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-conversation-service
       tag: latest
     port: 8007
     targetPort: 8007
-    replicas: 2
+    replicas: 1  # Reduced for cost savings
     resources:
       limits:
-        cpu: 500m
-        memory: 1Gi
+        cpu: 200m  # Ultra-minimal for conversation
+        memory: 256Mi
       requests:
-        cpu: 200m
-        memory: 512Mi
+        cpu: 50m   # Ultra-low request
+        memory: 128Mi
     env:
       - name: MONGODB_URL
-        valueFrom:
-          secretKeyRef:
-            name: database-credentials
-            key: mongodb_url
+        value: "mongodb://munshi:munshi123@munshi-platform-mongodb:27017/munshi_conversations?authSource=munshi"
+      - name: LLM_SERVICE_URL
+        value: "http://llm-service:8005"
       - name: GOOGLE_API_KEY
         valueFrom:
           secretKeyRef:
             name: google-api-keys
             key: api-key
 
-  # LLM Service
+  # LLM Service - optimized for memory-intensive node
   llmService:
     enabled: true
     name: llm-service
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-llm-service
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-llm-service
       tag: latest
     port: 8005
     targetPort: 8005
-    replicas: 2
+    replicas: 1  # Single replica for cost control
     resources:
       limits:
-        cpu: 500m
-        memory: 1Gi
+        cpu: 1000m  # Reduced for smaller e2-standard-2 node
+        memory: 6Gi   # Fit within 8GB node limit
       requests:
-        cpu: 200m
-        memory: 512Mi
+        cpu: 200m   # Lower request for cost savings
+        memory: 2Gi   # Minimal viable memory
     nodeSelector:
       workload-type: "memory-intensive"
     tolerations:
@@ -159,51 +165,72 @@ services:
             name: google-api-keys
             key: api-key
 
-  # Pronunciation Evaluator
+  # Pronunciation Evaluator - optimized for packing
   pronunciationEvaluator:
     enabled: true
     name: pronunciation-evaluator
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-pronunciation-evaluator
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-pronunciation-evaluator
       tag: latest
     port: 8006
     targetPort: 8006
-    replicas: 2
+    replicas: 1  # Reduced for cost savings
     resources:
       limits:
-        cpu: 500m
-        memory: 1Gi
+        cpu: 150m  # Ultra-minimal for pronunciation
+        memory: 256Mi
       requests:
-        cpu: 200m
-        memory: 512Mi
+        cpu: 50m   # Ultra-low request
+        memory: 128Mi
 
-  # UI Service
+  # UI Service - optimized for packing
   uiService:
     enabled: true
     name: ui-service
     image:
-      repository: us-central1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-ui-service
+      repository: us-east1-docker.pkg.dev/central-list-469110-f1/munshi-containers/munshi-ui-service
       tag: latest
     port: 80
     targetPort: 8002
-    replicas: 2
+    replicas: 1  # Single replica sufficient for demo
     serviceType: LoadBalancer
     resources:
       limits:
-        cpu: 300m
-        memory: 512Mi
+        cpu: 100m  # Ultra-minimal for UI
+        memory: 128Mi
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 25m   # Ultra-low request
+        memory: 64Mi
     env:
       - name: AUTH_SERVICE_URL
         value: "http://auth-service:8001"
       - name: AUDIO_SERVICE_URL
         value: "http://audio-service:8003"
+      - name: CONVERSATION_SERVICE_URL
+        value: "http://conversation-service:8007"
 
-# Database configuration for GCP
+# Database configuration optimized for cost
 postgresql:
-  enabled: true
+  enabled: false
+  global:
+    postgresql:
+      auth:
+        existingSecret: ""
+  image:
+    registry: docker.io
+    repository: postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  primary:
+    podSecurityContext:
+      enabled: false
+    containerSecurityContext:
+      enabled: false
+    extraEnvVars:
+      - name: POSTGRES_INITDB_ARGS
+        value: "--data-checksums"
+      - name: PGDATA
+        value: "/var/lib/postgresql/data/pgdata"
   auth:
     postgresPassword: "postgres123"
     database: "munshi_auth"
@@ -212,8 +239,15 @@ postgresql:
   primary:
     persistence:
       enabled: true
-      size: 20Gi
+      size: 10Gi  # Reduced storage for cost savings
       storageClass: "standard-rwo"
+    resources:
+      limits:
+        cpu: 300m     # Ultra-optimized for e2-small node
+        memory: 512Mi  # Fit within 2GB node limit
+      requests:
+        cpu: 100m
+        memory: 256Mi
     nodeSelector:
       workload-type: "database"
     tolerations:
@@ -223,9 +257,18 @@ postgresql:
         effect: "NoSchedule"
   architecture: standalone
 
-# MongoDB configuration for GCP
+# MongoDB configuration optimized for cost
 mongodb:
-  enabled: true
+  enabled: false
+  image:
+    registry: docker.io
+    repository: mongo
+    tag: 8.0
+    pullPolicy: IfNotPresent
+  podSecurityContext:
+    enabled: false
+  containerSecurityContext:
+    enabled: false
   auth:
     enabled: true
     rootUser: "root"
@@ -235,8 +278,15 @@ mongodb:
     databases: ["munshi"]
   persistence:
     enabled: true
-    size: 20Gi
+    size: 10Gi  # Reduced storage for cost savings
     storageClass: "standard-rwo"
+  resources:
+    limits:
+      cpu: 300m     # Ultra-optimized for e2-small node
+      memory: 512Mi  # Fit within 2GB node limit
+    requests:
+      cpu: 100m
+      memory: 256Mi
   nodeSelector:
     workload-type: "database"
   tolerations:
@@ -247,21 +297,45 @@ mongodb:
   architecture: standalone
 
 # Secrets configuration
+# Secrets are created by Makefile in GCP deployment, not by Helm
+createSecrets: false
 secrets:
   jwt_secret: "your-jwt-secret-here-change-in-production"
   google_api_key: "your-google-api-key-here"
 
-# Redis configuration for GCP
+# Redis configuration optimized for cost
 redis:
-  enabled: true
+  enabled: false
+  image:
+    registry: docker.io
+    repository: redis
+    tag: 7.4-alpine
+    pullPolicy: IfNotPresent
+  master:
+    podSecurityContext:
+      enabled: false
+    containerSecurityContext:
+      enabled: false
+  replica:
+    podSecurityContext:
+      enabled: false
+    containerSecurityContext:
+      enabled: false
   auth:
     enabled: true
     password: "redis123"
   master:
     persistence:
       enabled: true
-      size: 8Gi
+      size: 4Gi  # Reduced storage for cost savings
       storageClass: "standard-rwo"
+    resources:
+      limits:
+        cpu: 200m     # Ultra-optimized for e2-small node
+        memory: 256Mi  # Minimal for Redis
+      requests:
+        cpu: 50m
+        memory: 128Mi
     nodeSelector:
       workload-type: "database"
     tolerations:

@@ -8,7 +8,8 @@ PROJECT_ID=${PROJECT_ID:-"your-project-id"}
 CLUSTER_NAME=${CLUSTER_NAME:-"munshi-cluster"}
 ZONE=${ZONE:-"us-central1-a"}
 REGION=${REGION:-"us-central1"}
-IMAGE_NAME="gcr.io/${PROJECT_ID}/asr-service-gpu"
+VERSION=$(date +%Y%m%d-%H%M%S)
+IMAGE_NAME="gcr.io/${PROJECT_ID}/asr-service-gpu:${VERSION}"
 NAMESPACE=${NAMESPACE:-"default"}
 
 # Colors for output
@@ -108,13 +109,26 @@ else
     echo -e "${GREEN}✅ Prometheus already installed${NC}"
 fi
 
-# Build and push Docker image
+# Create model storage bucket if it doesn't exist
+echo -e "${YELLOW}🗄️  Setting up model storage...${NC}"
+MODEL_BUCKET="${PROJECT_ID}-munshi-models"
+if ! gsutil ls gs://${MODEL_BUCKET} >/dev/null 2>&1; then
+    echo "Creating model storage bucket: ${MODEL_BUCKET}"
+    gsutil mb -p ${PROJECT_ID} -c STANDARD -l ${REGION} gs://${MODEL_BUCKET}
+    gsutil iam ch serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com:objectViewer gs://${MODEL_BUCKET}
+    echo -e "${GREEN}✅ Model storage bucket created${NC}"
+else
+    echo -e "${GREEN}✅ Model storage bucket already exists${NC}"
+fi
+
+# Build and push Docker image using lightweight dockerfile
 echo -e "${YELLOW}🏗️  Building and pushing Docker image...${NC}"
-gcloud builds submit --tag ${IMAGE_NAME} --file Dockerfile.k8s-gpu .
+echo "📦 Using lightweight Dockerfile for faster GPU deployment"
+gcloud builds submit --tag ${IMAGE_NAME} --file Dockerfile.lightweight .
 
 # Update deployment manifest with correct image
 echo -e "${YELLOW}📝 Updating deployment configuration...${NC}"
-sed -i.bak "s|gcr.io/PROJECT_ID/asr-service-gpu:latest|${IMAGE_NAME}:latest|g" k8s-gpu-deployment.yaml
+sed -i.bak "s|gcr.io/PROJECT_ID/asr-service-gpu:latest|${IMAGE_NAME}|g" k8s-gpu-deployment.yaml
 
 # Deploy the ASR service
 echo -e "${YELLOW}🚀 Deploying ASR service...${NC}"

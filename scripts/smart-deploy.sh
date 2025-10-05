@@ -12,7 +12,7 @@ NC='\033[0m'
 
 # Configuration
 PROJECT_ID="central-list-469110-f1"
-REGION="us-central1"
+REGION="us-east1"
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/munshi-containers"
 SERVICES=(auth-service audio-service asr-service conversation-service llm-service pronunciation-evaluator ui-service)
 

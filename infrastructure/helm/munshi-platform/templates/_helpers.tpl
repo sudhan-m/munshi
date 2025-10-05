@@ -85,7 +85,11 @@ Get image name for a service
 {{- $registry := $root.Values.global.imageRegistry | default $root.Values.image.registry -}}
 {{- $repository := $service.image.repository -}}
 {{- $tag := $service.image.tag | default $root.Values.image.tag | default $root.Chart.AppVersion -}}
+{{- if $registry -}}
 {{- printf "%s/%s:%s" $registry $repository $tag }}
+{{- else -}}
+{{- printf "%s:%s" $repository $tag }}
+{{- end }}
 {{- end }}
 
 {{/*

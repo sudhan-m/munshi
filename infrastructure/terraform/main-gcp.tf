@@ -123,20 +123,20 @@ resource "google_container_cluster" "cluster" {
   }
 }
 
-# General purpose node pool for most services
+# Optimized general purpose node pool - cost-effective packing
 resource "google_container_node_pool" "general_nodes" {
   name       = "${var.cluster_name}-general-pool"
   location   = var.zone
   cluster    = google_container_cluster.cluster.name
-  
+
   autoscaling {
-    min_node_count = var.environment == "production" ? 2 : 1
-    max_node_count = var.environment == "production" ? 10 : 5
+    min_node_count = 1  # Always keep at least 1 for core services
+    max_node_count = 3  # Reduced for cost control
   }
 
   node_config {
-    spot         = var.use_spot_instances
-    machine_type = "e2-medium"
+    spot         = true  # Force spot instances for maximum savings
+    machine_type = "e2-standard-4"  # Larger nodes for better packing (4 vCPU, 16GB)
 
     service_account = google_service_account.cluster_service_account.email
     oauth_scopes    = [
@@ -147,8 +147,8 @@ resource "google_container_node_pool" "general_nodes" {
       disable-legacy-endpoints = "true"
     }
 
-    disk_size_gb = var.environment != "production" ? 30 : 100
-    disk_type    = "pd-standard"
+    disk_size_gb = 50  # Balanced size for multiple services
+    disk_type    = "pd-standard"  # Cost-effective storage
 
     labels = {
       environment    = var.environment
@@ -168,20 +168,20 @@ resource "google_container_node_pool" "general_nodes" {
   }
 }
 
-# High-memory node pool for LLM services
+# Optimized memory node pool - cost-effective for LLM services
 resource "google_container_node_pool" "memory_nodes" {
   name     = "${var.cluster_name}-memory-pool"
   location = var.zone
   cluster  = google_container_cluster.cluster.name
-  
+
   autoscaling {
-    min_node_count = 0
-    max_node_count = 3
+    min_node_count = 0  # Scale to zero when not needed
+    max_node_count = 1  # Single node for cost control
   }
 
   node_config {
-    spot         = var.use_spot_instances
-    machine_type = "e2-highmem-4"
+    spot         = true  # Force spot instances for 80% cost savings
+    machine_type = "e2-highmem-2"  # Smaller but sufficient (2 vCPU, 16GB)
 
     service_account = google_service_account.cluster_service_account.email
     oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -190,8 +190,8 @@ resource "google_container_node_pool" "memory_nodes" {
       disable-legacy-endpoints = "true"
     }
 
-    disk_size_gb = 50
-    disk_type    = "pd-ssd"
+    disk_size_gb = 30  # Reduced disk size
+    disk_type    = "pd-standard"  # Cost-effective storage
 
     labels = {
       workload-type = "memory-intensive"
@@ -210,23 +210,23 @@ resource "google_container_node_pool" "memory_nodes" {
   }
 }
 
-# GPU node pool for ASR service
+# GPU node pool for ASR service - ENABLED (moved to us-east1-a with upgraded billing)
 resource "google_container_node_pool" "gpu_nodes" {
   name     = "${var.cluster_name}-gpu-pool"
   location = var.zone
   cluster  = google_container_cluster.cluster.name
-  
+
   autoscaling {
-    min_node_count = 0
-    max_node_count = 2
+    min_node_count = 0  # Scales to zero when idle
+    max_node_count = 1  # Reduced to 1 for cost optimization
   }
 
   node_config {
-    spot         = var.use_spot_instances
-    machine_type = "n1-standard-4"
+    spot         = true  # Force spot instances for maximum cost savings
+    machine_type = "g2-standard-4"  # Required for nvidia-l4 GPU
 
     guest_accelerator {
-      type  = "nvidia-tesla-t4"
+      type  = "nvidia-l4"  # L4 is available in us-east1-b (newer than T4)
       count = 1
     }
 
@@ -237,8 +237,8 @@ resource "google_container_node_pool" "gpu_nodes" {
       disable-legacy-endpoints = "true"
     }
 
-    disk_size_gb = 100
-    disk_type    = "pd-ssd"
+    disk_size_gb = 20    # Minimal disk size
+    disk_type    = "pd-standard"  # Cheapest storage
 
     labels = {
       workload-type = "gpu"
@@ -253,20 +253,20 @@ resource "google_container_node_pool" "gpu_nodes" {
   }
 }
 
-# Database node pool - on-demand for reliability
+# Optimized database node pool - balanced cost and reliability
 resource "google_container_node_pool" "database_nodes" {
   name     = "${var.cluster_name}-database-pool"
   location = var.zone
   cluster  = google_container_cluster.cluster.name
-  
+
   autoscaling {
-    min_node_count = 1
-    max_node_count = 3
+    min_node_count = 1  # Keep minimum for database availability
+    max_node_count = 2  # Reduced scaling for cost control
   }
 
   node_config {
-    spot         = false  # Databases need reliability
-    machine_type = "e2-standard-4"
+    spot         = true  # Use spot for cost savings (databases can handle restarts)
+    machine_type = "e2-standard-2"  # Smaller instance (2 vCPU, 8GB)
 
     service_account = google_service_account.cluster_service_account.email
     oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -275,8 +275,8 @@ resource "google_container_node_pool" "database_nodes" {
       disable-legacy-endpoints = "true"
     }
 
-    disk_size_gb = 100
-    disk_type    = "pd-ssd"
+    disk_size_gb = 50  # Reduced disk size
+    disk_type    = "pd-standard"  # Cost-effective storage
 
     labels = {
       workload-type = "database"
@@ -306,6 +306,15 @@ resource "google_artifact_registry_repository" "munshi_containers" {
   labels = {
     environment = var.environment
     project     = "munshi"
+  }
+
+  lifecycle {
+    # Ignore changes to labels that might be managed externally
+    ignore_changes = [labels]
+    # Don't recreate if it already exists - just import it
+    create_before_destroy = false
+    # Prevent destruction if it already exists
+    prevent_destroy = false
   }
 
   depends_on = [google_project_service.artifact_registry_api]
@@ -368,132 +377,151 @@ resource "google_project_iam_member" "cluster_service_account_storage" {
 # Get current Google Cloud client configuration
 data "google_client_config" "provider" {}
 
-# Kubernetes Provider
-provider "kubernetes" {
-  host                   = "https://${google_container_cluster.cluster.endpoint}"
-  cluster_ca_certificate = base64decode(google_container_cluster.cluster.master_auth[0].cluster_ca_certificate)
-  token                  = data.google_client_config.provider.access_token
-}
+# Kubernetes Provider - Commented out to avoid chicken-and-egg with cluster creation
+# Namespace creation is handled by kubectl in Makefile
+# provider "kubernetes" {
+#   host                   = "https://${google_container_cluster.cluster.endpoint}"
+#   cluster_ca_certificate = base64decode(google_container_cluster.cluster.master_auth[0].cluster_ca_certificate)
+#   token                  = data.google_client_config.provider.access_token
+# }
 
-# Helm Provider
-provider "helm" {
-  kubernetes {
-    host                   = "https://${google_container_cluster.cluster.endpoint}"
-    cluster_ca_certificate = base64decode(google_container_cluster.cluster.master_auth[0].cluster_ca_certificate)
-    token                  = data.google_client_config.provider.access_token
-  }
-}
+# Helm Provider - Commented out to avoid chicken-and-egg with cluster creation
+# Helm deployments are handled by Makefile
+# provider "helm" {
+#   kubernetes {
+#     host                   = "https://${google_container_cluster.cluster.endpoint}"
+#     cluster_ca_certificate = base64decode(google_container_cluster.cluster.master_auth[0].cluster_ca_certificate)
+#     token                  = data.google_client_config.provider.access_token
+#   }
+# }
 
-# Create cert-manager namespace
+# Create main application namespace - Commented out, handled by kubectl in Makefile
+# resource "kubernetes_namespace" "munshi_namespace" {
+#   metadata {
+#     name = var.namespace
+#     labels = {
+#       "app.kubernetes.io/name" = "munshi-platform"
+#     }
+#   }
+#   depends_on = [google_container_cluster.cluster]
+# }
+
+# Create cert-manager namespace - Commented out, handled by kubectl in Makefile
 # Optional cert-manager namespace
-resource "kubernetes_namespace" "cert_manager" {
-  count = var.enable_cert_manager ? 1 : 0
-  
-  metadata {
-    name = "cert-manager"
-    labels = {
-      "app.kubernetes.io/name" = "cert-manager"
-    }
-  }
-  depends_on = [google_container_cluster.cluster]
-}
+# resource "kubernetes_namespace" "cert_manager" {
+#   count = var.enable_cert_manager ? 1 : 0
+#
+#   metadata {
+#     name = "cert-manager"
+#     labels = {
+#       "app.kubernetes.io/name" = "cert-manager"
+#     }
+#   }
+#   depends_on = [google_container_cluster.cluster]
+# }
 
-# Optional cert-manager installation using Helm
-resource "helm_release" "cert_manager" {
-  count = var.enable_cert_manager ? 1 : 0
-  
-  name       = "cert-manager"
-  repository = "https://charts.jetstack.io"
-  chart      = "cert-manager"
-  version    = "v1.13.2"
-  namespace  = kubernetes_namespace.cert_manager[0].metadata[0].name
-  timeout    = var.deployment_timeout
+# Optional cert-manager installation using Helm - Commented out, handled by Helm in Makefile
+# resource "helm_release" "cert_manager" {
+#   count = var.enable_cert_manager ? 1 : 0
+#
+#   name       = "cert-manager"
+#   repository = "https://charts.jetstack.io"
+#   chart      = "cert-manager"
+#   version    = "v1.13.2"
+#   namespace  = kubernetes_namespace.cert_manager[0].metadata[0].name
+#   timeout    = var.deployment_timeout
+#
+#   set {
+#     name  = "installCRDs"
+#     value = "true"
+#   }
+#
+#   set {
+#     name  = "global.leaderElection.namespace"
+#     value = kubernetes_namespace.cert_manager[0].metadata[0].name
+#   }
+#
+#   depends_on = [
+#     kubernetes_namespace.cert_manager,
+#     google_container_node_pool.general_nodes
+#   ]
+# }
 
-  set {
-    name  = "installCRDs"
-    value = "true"
-  }
-
-  set {
-    name  = "global.leaderElection.namespace"
-    value = kubernetes_namespace.cert_manager[0].metadata[0].name
-  }
-
-  depends_on = [
-    kubernetes_namespace.cert_manager,
-    google_container_node_pool.general_nodes
-  ]
-}
-
-# Database initialization job
-resource "kubernetes_job" "database_init" {
-  count = var.enable_database_init ? 1 : 0
-  
-  metadata {
-    name      = "database-init"
-    namespace = var.namespace
-  }
-  
-  spec {
-    template {
-      metadata {}
-      spec {
-        restart_policy = "OnFailure"
-        
-        container {
-          name    = "postgres-init"
-          image   = "postgres:15-alpine"
-          command = ["/bin/sh"]
-          args = ["-c", <<-EOT
-            export PGPASSWORD="$POSTGRES_PASSWORD"
-            echo "Waiting for PostgreSQL to be ready..."
-            until pg_isready -h $POSTGRES_HOST -p 5432 -U postgres; do
-              echo "PostgreSQL not ready, waiting..."
-              sleep 5
-            done
-            echo "PostgreSQL is ready, creating database and user..."
-            psql -h $POSTGRES_HOST -U postgres -c "CREATE DATABASE IF NOT EXISTS munshi_auth;"
-            psql -h $POSTGRES_HOST -U postgres -c "CREATE USER IF NOT EXISTS munshi_user WITH PASSWORD '$MUNSHI_PASSWORD';"
-            psql -h $POSTGRES_HOST -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE munshi_auth TO munshi_user;"
-            psql -h $POSTGRES_HOST -U postgres -d munshi_auth -c "GRANT ALL ON SCHEMA public TO munshi_user;"
-            psql -h $POSTGRES_HOST -U postgres -d munshi_auth -c "GRANT CREATE ON SCHEMA public TO munshi_user;"
-            echo "Database initialization completed successfully!"
-          EOT
-          ]
-          
-          env {
-            name  = "POSTGRES_HOST"
-            value = "munshi-platform-postgresql"
-          }
-          env {
-            name  = "POSTGRES_PASSWORD"
-            value = var.postgres_password
-          }
-          env {
-            name  = "MUNSHI_PASSWORD"
-            value = var.munshi_db_password
-          }
-        }
-        
-        # Use database node pool
-        node_selector = {
-          workload-type = "database"
-        }
-        
-        toleration {
-          key    = "workload-type"
-          value  = "database" 
-          effect = "NoSchedule"
-        }
-      }
-    }
-    
-    backoff_limit              = 3
-    ttl_seconds_after_finished = 300
-  }
-  
-  depends_on = [
-    google_container_node_pool.database_nodes,
-    google_container_cluster.cluster
-  ]
-}
+# Database initialization job - Commented out, handled by Makefile/Helm
+# resource "kubernetes_job" "database_init" {
+#   count = var.enable_database_init ? 1 : 0
+#
+#   metadata {
+#     name      = "database-init"
+#     namespace = var.namespace
+#   }
+#
+#   spec {
+#     template {
+#       metadata {}
+#       spec {
+#         restart_policy = "OnFailure"
+#
+#         container {
+#           name    = "postgres-init"
+#           image   = "postgres:15-alpine"
+#           command = ["/bin/sh"]
+#           args = ["-c", <<-EOT
+#             export PGPASSWORD="$POSTGRES_PASSWORD"
+#             echo "Waiting for PostgreSQL to be ready..."
+#             until pg_isready -h $POSTGRES_HOST -p 5432 -U postgres; do
+#               echo "PostgreSQL not ready, waiting..."
+#               sleep 5
+#             done
+#             echo "PostgreSQL is ready, creating database and user..."
+#             psql -h $POSTGRES_HOST -U postgres -c "CREATE DATABASE IF NOT EXISTS munshi_auth;"
+#             psql -h $POSTGRES_HOST -U postgres -c "CREATE USER IF NOT EXISTS munshi_user WITH PASSWORD '$MUNSHI_PASSWORD';"
+#             psql -h $POSTGRES_HOST -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE munshi_auth TO munshi_user;"
+#             psql -h $POSTGRES_HOST -U postgres -d munshi_auth -c "GRANT ALL ON SCHEMA public TO munshi_user;"
+#             psql -h $POSTGRES_HOST -U postgres -d munshi_auth -c "GRANT CREATE ON SCHEMA public TO munshi_user;"
+#             echo "Database initialization completed successfully!"
+#           EOT
+#           ]
+#
+#           env {
+#             name  = "POSTGRES_HOST"
+#             value = "munshi-platform-postgresql"
+#           }
+#           env {
+#             name  = "POSTGRES_PASSWORD"
+#             value = var.postgres_password
+#           }
+#           env {
+#             name  = "MUNSHI_PASSWORD"
+#             value = var.munshi_db_password
+#           }
+#         }
+#
+#         # Use database node pool
+#         node_selector = {
+#           workload-type = "database"
+#         }
+#
+#         toleration {
+#           key    = "workload-type"
+#           value  = "database"
+#           effect = "NoSchedule"
+#         }
+#       }
+#     }
+#
+#     backoff_limit              = 3
+#     ttl_seconds_after_finished = 300
+#   }
+#
+#   depends_on = [
+#     kubernetes_namespace.munshi_namespace,
+#     google_container_node_pool.database_nodes,
+#     google_container_cluster.cluster
+#   ]
+#
+#   lifecycle {
+#     # Allow graceful handling if namespace doesn't exist yet
+#     ignore_changes = [metadata[0].namespace]
+#   }
+# }

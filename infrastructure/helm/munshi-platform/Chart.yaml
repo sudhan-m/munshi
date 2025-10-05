@@ -20,16 +20,17 @@ sources:
   - https://github.com/munshi/munshi-platform
 
 # Dependencies for complete platform deployment
+# Using older Bitnami chart versions with working images
 dependencies:
   - name: redis
-    version: 17.11.3
+    version: 19.6.4
     repository: https://charts.bitnami.com/bitnami
     condition: redis.enabled
   - name: postgresql
-    version: 12.5.8
+    version: 15.5.28
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
   - name: mongodb
-    version: 13.15.1
+    version: 15.6.24
     repository: https://charts.bitnami.com/bitnami
     condition: mongodb.enabled

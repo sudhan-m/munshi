@@ -15,7 +15,12 @@ from typing import List, Dict, Any, Optional
 import os
 import httpx
 import uvicorn
+import logging
 from datetime import datetime, timedelta
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from database import connect_to_mongo, close_mongo_connection, get_conversations_collection, get_users_collection, get_pronunciation_profiles_collection
 from models import (
@@ -230,20 +235,23 @@ class ConversationOrchestrator:
         
         await collection.insert_one(message)
     
-    async def handle_text_conversation(self, user_id: str, message: str) -> str:
+    async def handle_text_conversation(self, user_id: str, message: str, language: str = None) -> str:
         """Handle text-based conversation"""
         try:
             # Get user profile and context
             user_profile = await self.get_or_create_user_profile(user_id)
             context = await self.get_conversation_context(user_id)
-            
+
+            # Use provided language or fall back to user profile
+            target_language = language or user_profile.get("preferred_language", "English")
+
             # Call LLM service for conversation
             response = await self.http_client.post(
                 f"{LLM_SERVICE_URL}/conversation",
                 json={
                     "user_message": message,
                     "context": context,
-                    "language": user_profile.get("preferred_language", "English")
+                    "language": target_language
                 }
             )
             
@@ -270,7 +278,9 @@ class ConversationOrchestrator:
                 return "I'm currently experiencing technical difficulties. Please try again later."
                 
         except Exception as e:
-            print(f"Error in text conversation: {e}")
+            logger.error(f"Error in text conversation: {type(e).__name__}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return "I apologize, but I'm experiencing technical difficulties. Please try again."
     
     async def handle_pronunciation_evaluation(
@@ -488,26 +498,30 @@ async def health_check():
 async def chat_with_user(request: ConversationRequest):
     """
     Handle user conversation - main entry point for text-based interaction.
-    
+
     Args:
         request: Conversation request with user message and context
-        
+
     Returns:
         ConversationResponse with assistant response
     """
     try:
+        logger.info(f"Received chat request: user_id={request.user_id}, message={request.message[:50]}..., language={request.language}")
         response_text = await orchestrator.handle_text_conversation(
             request.user_id,
-            request.message
+            request.message,
+            request.language
         )
-        
+        logger.info(f"Generated response: {response_text[:100]}...")
+
         return ConversationResponse(
             success=True,
             response=response_text,
             timestamp=datetime.utcnow()
         )
-        
+
     except Exception as e:
+        logger.error(f"Error in chat endpoint: {type(e).__name__}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Error processing conversation: {str(e)}"

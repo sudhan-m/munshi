@@ -23,23 +23,22 @@ import uvicorn
 import logging
 
 from models import TranscriptionRequest, TranscriptionResponse
+# Production optimized imports
 from cloudrun_config import cloudrun_config, MemoryMonitor
 from model_strategy import model_strategy
+from model_cache import ExternalModelCache
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Cloud Run optimized configuration
-CLOUD_RUN_MODE = os.getenv("CLOUD_RUN_MODE", "true").lower() == "true"
-GPU_SUPPORT = os.getenv("GPU_SUPPORT", "cpu").lower()  # Default to CPU for Cloud Run
-FALLBACK_MODE = os.getenv("FALLBACK_MODE", "true").lower() == "true"  # Default to fallback for Cloud Run
-MODEL_CACHE_SIZE = int(os.getenv("MODEL_CACHE_SIZE", "1"))  # Only cache 1 model in Cloud Run
+# Production configuration
+GPU_SUPPORT = os.getenv("GPU_SUPPORT", "cuda").lower()  # Default to GPU for production
+MODEL_CACHE_SIZE = int(os.getenv("MODEL_CACHE_SIZE", "3"))  # Cache multiple models
 
-# Set PyTorch threading for Cloud Run
-if CLOUD_RUN_MODE:
-    torch.set_num_threads(cloudrun_config.get_optimal_torch_threads())
-    logger.info(f"Set PyTorch threads to {cloudrun_config.get_optimal_torch_threads()}")
+# Set PyTorch threading for optimal performance
+torch.set_num_threads(cloudrun_config.get_optimal_torch_threads())
+logger.info(f"Set PyTorch threads to {cloudrun_config.get_optimal_torch_threads()}")
 
 # Log system info
 cloudrun_config.log_system_info()
@@ -66,25 +65,15 @@ def detect_device():
         return "cpu"
 
 DEVICE = detect_device()
-print(f"ASR Service using device: {DEVICE} (GPU_SUPPORT={GPU_SUPPORT}, FALLBACK_MODE={FALLBACK_MODE})")
+print(f"ASR Service using device: {DEVICE} (GPU_SUPPORT={GPU_SUPPORT})")
 
-# Model configurations (keeping original choices)
-if CLOUD_RUN_MODE or FALLBACK_MODE or DEVICE == "cpu":
-    # Use smaller, CPU-friendly models for Cloud Run and fallback mode
-    MODEL_CONFIGS = {
-        "English": "openai/whisper-base",
-        "Tamil": "openai/whisper-base",  # Fallback to base model for Tamil
-        "Malayalam": "openai/whisper-base"  # Fallback to base model for Malayalam
-    }
-    logger.info("Using CPU-optimized models for Cloud Run/fallback mode")
-else:
-    # Use full-size models for GPU inference (original choices)
-    MODEL_CONFIGS = {
-        "English": "openai/whisper-large-v2",
-        "Tamil": "vasista22/whisper-tamil-large-v2", 
-        "Malayalam": "thennal/whisper-medium-ml"
-    }
-    logger.info("Using full-size models for GPU inference")
+# Production model configurations
+MODEL_CONFIGS = {
+    "English": "openai/whisper-large-v2",
+    "Tamil": "vasista22/whisper-tamil-large-v2", 
+    "Malayalam": "thennal/whisper-medium-ml"
+}
+logger.info("Using production models for optimal quality")
 
 LANG_CODES = {
     "English": "en",
@@ -108,15 +97,16 @@ app.add_middleware(
 )
 
 class WhisperASR:
-    """Cloud Run optimized Whisper ASR with lazy loading and memory management"""
+    """Production Whisper ASR with external model cache"""
     
     def __init__(self):
         self.current_model = {"language": None, "model": None, "processor": None}
         self.load_lock = asyncio.Lock()  # Prevent concurrent model loading
         self.model_load_time = None
+        self.model_cache = ExternalModelCache()
     
     async def load_model(self, language_choice: str):
-        """Cloud Run optimized model loading with async lock"""
+        """Production model loading with async lock"""
         async with self.load_lock:
             # Return cached model if available
             if (self.current_model["language"] == language_choice and 
@@ -127,25 +117,17 @@ class WhisperASR:
             # Clear previous model to free memory
             await self._clear_current_model()
             
-            # Load new model
-            model_id = MODEL_CONFIGS[language_choice]
-            logger.info(f"Loading Whisper model: {model_id} for Cloud Run")
-            
             start_time = time.time()
             
             try:
-                # Cloud Run optimized loading
-                dtype = torch.float32  # Always use float32 for CPU in Cloud Run
+                # Use external model cache for loading
+                model, processor = await self.model_cache.get_model(language_choice, False)
                 
-                # Load with minimal memory footprint
-                model = WhisperForConditionalGeneration.from_pretrained(
-                    model_id, 
-                    torch_dtype=dtype,
-                    low_cpu_mem_usage=True,  # Optimize for Cloud Run memory constraints
-                    use_safetensors=True if CLOUD_RUN_MODE else False
-                ).to(DEVICE)
+                if model is None or processor is None:
+                    raise Exception("Model loading from cache failed")
                 
-                processor = WhisperProcessor.from_pretrained(model_id)
+                # Move model to correct device
+                model = model.to(DEVICE)
                 
                 self.current_model = {
                     "language": language_choice,
@@ -158,28 +140,28 @@ class WhisperASR:
                 return model, processor
                 
             except Exception as e:
-                logger.error(f"✗ Error loading Whisper model {model_id}: {e}")
+                logger.error(f"✗ Error loading model for {language_choice}: {e}")
                 
-                # Cloud Run fallback strategy - always use tiny model
+                # Final fallback to tiny model
                 try:
-                    logger.info("Attempting Cloud Run fallback to whisper-tiny...")
-                    fallback_model = WhisperForConditionalGeneration.from_pretrained(
-                        "openai/whisper-tiny", 
-                        torch_dtype=torch.float32,
-                        low_cpu_mem_usage=True
-                    ).to("cpu")
-                    fallback_processor = WhisperProcessor.from_pretrained("openai/whisper-tiny")
+                    logger.info("Attempting final fallback to whisper-tiny...")
+                    model, processor = await self.model_cache.get_model("fallback", True)
                     
-                    self.current_model = {
-                        "language": language_choice,
-                        "model": fallback_model,
-                        "processor": fallback_processor
-                    }
-                    
-                    self.model_load_time = time.time() - start_time
-                    logger.info(f"✓ Fallback to tiny model for {language_choice} in {self.model_load_time:.2f}s")
-                    return fallback_model, fallback_processor
-                    
+                    if model and processor:
+                        model = model.to("cpu")  # Force CPU for fallback
+                        
+                        self.current_model = {
+                            "language": language_choice,
+                            "model": model,
+                            "processor": processor
+                        }
+                        
+                        self.model_load_time = time.time() - start_time
+                        logger.info(f"✓ Fallback to tiny model for {language_choice} in {self.model_load_time:.2f}s")
+                        return model, processor
+                    else:
+                        raise Exception("Fallback model loading failed")
+                        
                 except Exception as final_error:
                     logger.error(f"✗ All fallback attempts failed: {final_error}")
                     raise HTTPException(status_code=500, detail=f"Model loading failed: {final_error}")
@@ -218,9 +200,9 @@ class WhisperASR:
         input_features = processor(audio, sampling_rate=16000, return_tensors="pt").input_features
         input_features = input_features.to(DEVICE, dtype=next(model.parameters()).dtype)
         
-        # Cloud Run optimized inference settings
-        max_length = 224 if CLOUD_RUN_MODE else 448  # Shorter for faster processing
-        num_beams = 1 if CLOUD_RUN_MODE else 5  # Greedy search for speed
+        # Production optimized inference settings
+        max_length = 448  # Full length for quality
+        num_beams = 5  # Beam search for quality
         do_sample = False  # Deterministic output
         temperature = 0.0
         
@@ -263,14 +245,11 @@ async def health_check():
     
     return {
         "status": "healthy", 
-        "service": "asr-service-cloud-run", 
+        "service": "asr-service-production", 
         "device": DEVICE,
-        "cloud_run_mode": CLOUD_RUN_MODE,
         "gpu_support": GPU_SUPPORT,
-        "fallback_mode": FALLBACK_MODE,
         "cuda_available": torch.cuda.is_available(),
         "mps_available": torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else False,
-        "environment": model_strategy.environment,
         "model_cache_size": MODEL_CACHE_SIZE,
         "current_model": asr.current_model["language"] if asr.current_model["model"] else None,
         "model_load_time": asr.model_load_time,
@@ -289,7 +268,7 @@ async def transcribe_audio(
     language: str = Form(...)
 ):
     """
-    Cloud Run optimized audio transcription endpoint.
+    Production audio transcription endpoint.
     
     Args:
         audio: Audio file to transcribe
@@ -306,7 +285,7 @@ async def transcribe_audio(
             detail=f"Unsupported language: {language}. Supported: {list(MODEL_CONFIGS.keys())}"
         )
     
-    # Validate file type and size for Cloud Run
+    # Validate file type and size
     allowed_types = ["audio/wav", "audio/mpeg", "audio/mp3", "audio/ogg", "audio/webm", "audio/m4a"]
     if audio.content_type and audio.content_type not in allowed_types:
         raise HTTPException(
@@ -337,7 +316,7 @@ async def transcribe_audio(
                     detail="Service temporarily overloaded. Please try again in a moment."
                 )
         
-        # Save uploaded audio temporarily with Cloud Run friendly naming
+        # Save uploaded audio temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav", prefix="asr_") as temp_file:
             temp_file.write(content)
             temp_file.flush()
@@ -396,15 +375,32 @@ async def get_supported_languages():
         "models": MODEL_CONFIGS
     }
 
+@app.get("/cache-info")
+async def get_cache_info():
+    """Get model cache information."""
+    return asr.model_cache.get_cache_info()
+
+@app.post("/clear-cache")
+async def clear_cache(model_id: Optional[str] = None):
+    """Clear model cache."""
+    try:
+        asr.model_cache.clear_cache(model_id)
+        # Also clear in-memory cache
+        await asr._clear_current_model()
+        return {"success": True, "message": f"Cache cleared for {model_id or 'all models'}"}
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Cache clear failed: {e}")
+
 if __name__ == "__main__":
-    # Cloud Run optimized server configuration
-    port = int(os.getenv("PORT", os.getenv("ASR_SERVICE_PORT", 8004)))  # Cloud Run uses PORT env var
+    # Production server configuration
+    port = int(os.getenv("PORT", os.getenv("ASR_SERVICE_PORT", 8004)))
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=port,
-        reload=False,  # Disable reload in production/Cloud Run
+        reload=False,  # Disable reload in production
         access_log=True,
         log_level="info"
     )

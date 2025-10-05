@@ -33,6 +33,8 @@ import os
 import re
 import logging
 from dotenv import load_dotenv
+import httpx
+import asyncio
 
 load_dotenv()
 settings = get_auth_settings()
@@ -175,21 +177,35 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     return UserResponse.from_orm(db_user)
 
 
+async def _prewarm_gpu():
+    """
+    Pre-warm GPU node by triggering ASR pod scheduling.
+    This ensures GPU is ready when user needs pronunciation practice.
+    Fire-and-forget - don't wait for response.
+    """
+    try:
+        asr_url = os.getenv("ASR_SERVICE_URL", "http://asr-service:8004")
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            await client.get(f"{asr_url}/health")
+    except:
+        pass  # Ignore errors - this is just a trigger
+
+
 @app.post("/auth/login")
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT access token with user data.
-    
+
     Accepts plaintext password, verifies against stored bcrypt hash,
     and returns JWT token along with user information for accessing protected endpoints.
-    
+
     Args:
         user_credentials: Login credentials with plaintext password
         db: Database session dependency
-        
+
     Returns:
         dict: JWT access token, token type, and user data
-        
+
     Raises:
         HTTPException: 401 if credentials are invalid
     """
@@ -205,11 +221,14 @@ async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
-    
+
+    # Pre-warm GPU node in background (fire-and-forget)
+    asyncio.create_task(_prewarm_gpu())
+
     # Return user data along with token
     user_data = UserResponse.from_orm(user)
     return {
-        "access_token": access_token, 
+        "access_token": access_token,
         "token_type": "bearer",
         "user": user_data.dict()
     }

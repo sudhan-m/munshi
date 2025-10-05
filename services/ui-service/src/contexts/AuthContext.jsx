@@ -31,6 +31,7 @@ const apiRequest = async (url, options = {}) => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
+  const [token, setToken] = useState(localStorage.getItem('token'))
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -60,11 +61,12 @@ export const AuthProvider = ({ children }) => {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
-      
+
       const { access_token, user: userData } = data
       localStorage.setItem('token', access_token)
+      setToken(access_token)
       setUser(userData)
-      
+
       return { success: true }
     } catch (error) {
       return { success: false, error: error.message }
@@ -85,10 +87,11 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     setUser(null)
+    setToken(null)
     localStorage.removeItem('token')
   }
 
-  const value = { user, loading, login, register, logout }
+  const value = { user, token, loading, login, register, logout }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

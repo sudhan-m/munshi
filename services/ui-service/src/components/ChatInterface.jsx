@@ -1,407 +1,579 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Send, Mic, Square, Play, Pause, Volume2, RotateCcw, Sparkles, Award } from 'lucide-react'
-import AudioRecorder from './AudioRecorder'
+import React, { useState, useRef, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import AudioSpectrum from './AudioSpectrum'
+import ChallengeBox from './ChallengeBox'
+import { LogOut, User, Mic2, Send, Mic, Square } from 'lucide-react'
 
-const ChatInterface = () => {
+const Chat = () => {
+  const { user, logout, token } = useAuth()
   const [messages, setMessages] = useState([])
-  const [inputMessage, setInputMessage] = useState('')
+  const [textInput, setTextInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedLanguage, setSelectedLanguage] = useState('English')
-  const [userId] = useState('demo_user') // In production, get from auth context
-  const [showPronunciationMode, setShowPronunciationMode] = useState(false)
-  const [currentPractice, setCurrentPractice] = useState(null)
-  const [isEvaluating, setIsEvaluating] = useState(false)
-  
+  const [currentAudio, setCurrentAudio] = useState(null)
+  const [currentAudioUrl, setCurrentAudioUrl] = useState(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const [audioLevel, setAudioLevel] = useState(0)
+  const [selectedLanguage, setSelectedLanguage] = useState(null)
+  const [isLanguageSelected, setIsLanguageSelected] = useState(false)
+  const [currentChallenge, setCurrentChallenge] = useState(null)
+
   const messagesEndRef = useRef(null)
-  const conversationServiceUrl = 'http://localhost:8007'
-  const audioServiceUrl = 'http://localhost:8003'
-
-  const languages = ['English', 'Tamil', 'Malayalam']
-
-  useEffect(() => {
-    // Welcome message
-    setMessages([{
-      id: 1,
-      role: 'assistant',
-      content: 'Hello! I\'m Munshi, your AI language learning companion. How can I help you practice today?',
-      timestamp: new Date(),
-      type: 'welcome'
-    }])
-  }, [])
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+  const streamRef = useRef(null)
+  const analyserRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const recordingIntervalRef = useRef(null)
+  const levelIntervalRef = useRef(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const sendMessage = async () => {
-    if (!inputMessage.trim()) return
+  const supportedLanguages = ['English', 'Malayalam', 'Tamil', 'Hindi']
 
-    const userMessage = {
-      id: Date.now(),
-      role: 'user',
-      content: inputMessage,
-      timestamp: new Date()
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  // Show welcome message on mount
+  useEffect(() => {
+    if (messages.length === 0) {
+      setTimeout(() => {
+        addMessage({
+          type: 'text',
+          content: `Hello ${user?.email?.split('@')[0] || 'there'}! 👋\n\nWelcome to Munshi, your AI language learning companion.\n\nWhich language would you like to practice today? I can help you with:\n• ${supportedLanguages.join('\n• ')}\n\nJust tell me which language you'd like to learn!`,
+          sender: 'assistant',
+          timestamp: new Date().toISOString()
+        })
+      }, 500)
+    }
+  }, []) // Updated: Force new build hash
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+      }
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current)
+      }
+      if (levelIntervalRef.current) {
+        clearInterval(levelIntervalRef.current)
+      }
+    }
+  }, [])
+
+  const addMessage = (message) => {
+    setMessages(prev => [...prev, { ...message, id: Date.now() }])
+  }
+
+  const detectLanguage = (text) => {
+    const normalizedText = text.toLowerCase().trim()
+
+    // Check for exact or partial matches
+    for (const lang of supportedLanguages) {
+      if (normalizedText.includes(lang.toLowerCase())) {
+        return lang
+      }
     }
 
-    setMessages(prev => [...prev, userMessage])
-    setInputMessage('')
+    // Check for common variations
+    if (normalizedText.includes('mal') || normalizedText.includes('malayalam')) return 'Malayalam'
+    if (normalizedText.includes('tam') || normalizedText.includes('tamil')) return 'Tamil'
+    if (normalizedText.includes('eng') || normalizedText.includes('english')) return 'English'
+    if (normalizedText.includes('hin') || normalizedText.includes('hindi')) return 'Hindi'
+
+    return null
+  }
+
+  const parsePracticeSentence = (text) => {
+    console.log('Parsing text for practice sentence:', text)
+
+    // Look for practice sentence patterns
+    // Pattern 1: **"Sentence"** with quotes
+    let boldQuoteMatch = text.match(/\*\*"([^"]+)"\*\*/)
+    if (boldQuoteMatch) {
+      const sentence = boldQuoteMatch[1]
+      const romanMatch = text.match(/\(([^)]+)\)/)
+      console.log('Found pattern 1 (with quotes):', sentence)
+      return {
+        original: sentence,
+        romanized: romanMatch ? romanMatch[1] : sentence,
+        english: 'Practice pronunciation'
+      }
+    }
+
+    // Pattern 2: **Sentence** without quotes
+    boldQuoteMatch = text.match(/\*\*([^*]+)\*\*/)
+    if (boldQuoteMatch) {
+      const sentence = boldQuoteMatch[1].trim()
+      const romanMatch = text.match(/\(([^)]+)\)/)
+      console.log('Found pattern 2 (without quotes):', sentence)
+      return {
+        original: sentence,
+        romanized: romanMatch ? romanMatch[1] : sentence,
+        english: 'Practice pronunciation'
+      }
+    }
+
+    // Pattern 3: Try saying: "Sentence"
+    const trySayingMatch = text.match(/[Tt]ry saying.*?["""]([^"""]+)["""]/s)
+    if (trySayingMatch) {
+      const sentence = trySayingMatch[1]
+      const romanMatch = text.match(/\(([^)]+)\)/)
+      console.log('Found pattern 3 (try saying):', sentence)
+      return {
+        original: sentence,
+        romanized: romanMatch ? romanMatch[1] : sentence,
+        english: 'Practice pronunciation'
+      }
+    }
+
+    console.log('No practice sentence pattern found')
+    return null
+  }
+
+  const handleTextSubmit = async (e) => {
+    e.preventDefault()
+    if (!textInput.trim()) return
+
+    const userMessage = textInput.trim()
+
+    addMessage({
+      type: 'text',
+      content: userMessage,
+      sender: 'user',
+      timestamp: new Date().toISOString()
+    })
+
+    setTextInput('')
     setIsLoading(true)
 
+    // Check if user hasn't selected a language yet
+    if (!isLanguageSelected) {
+      const detectedLang = detectLanguage(userMessage)
+
+      if (detectedLang) {
+        setSelectedLanguage(detectedLang)
+        setIsLanguageSelected(true)
+
+        setTimeout(() => {
+          addMessage({
+            type: 'text',
+            content: `Great! I'll help you learn ${detectedLang}. 🎉\n\nLet's get started! You can:\n• Type messages to practice conversation\n• Ask me to generate practice sentences\n• Use the challenge box to practice pronunciation\n\nWhat would you like to do?`,
+            sender: 'assistant',
+            timestamp: new Date().toISOString()
+          })
+          setIsLoading(false)
+        }, 800)
+      } else {
+        setTimeout(() => {
+          addMessage({
+            type: 'text',
+            content: `I'm not sure which language you meant. 🤔\n\nPlease choose from one of these supported languages:\n${supportedLanguages.map(lang => `• ${lang}`).join('\n')}\n\nJust type the name of the language you'd like to learn!`,
+            sender: 'assistant',
+            timestamp: new Date().toISOString()
+          })
+          setIsLoading(false)
+        }, 800)
+      }
+      return
+    }
+
+    // If language is already selected, handle normal conversation
     try {
-      const response = await fetch(`${conversationServiceUrl}/chat`, {
+      const response = await fetch('/api/conversation/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          user_id: userId,
-          message: inputMessage,
+          user_id: user?.email,
+          message: userMessage,
           language: selectedLanguage
         })
       })
 
-      if (response.ok) {
-        const result = await response.json()
-        if (result.success) {
-          const assistantMessage = {
-            id: Date.now() + 1,
-            role: 'assistant',
-            content: result.response,
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, assistantMessage])
-        }
+      if (!response.ok) {
+        throw new Error('Failed to get response')
       }
+
+      const result = await response.json()
+
+      if (result.success && result.response) {
+        // Try to parse as JSON first
+        let messageContent = result.response
+        let isPractice = false
+
+        try {
+          const jsonResponse = JSON.parse(result.response)
+          console.log('Parsed JSON response:', jsonResponse)
+          if (jsonResponse.type === 'practice' && jsonResponse.sentence) {
+            // Create practice challenge directly
+            isPractice = true
+            const challengeData = {
+              original: jsonResponse.sentence,
+              romanized: jsonResponse.romanized || jsonResponse.sentence,
+              english: jsonResponse.translation || 'Practice pronunciation'
+            }
+
+            console.log('Setting challenge:', challengeData)
+            console.log('isLanguageSelected:', isLanguageSelected, 'selectedLanguage:', selectedLanguage)
+
+            addMessage({
+              type: 'practice',
+              content: jsonResponse.sentence,
+              romanized: jsonResponse.romanized || jsonResponse.sentence,
+              translation: jsonResponse.translation || 'Practice pronunciation',
+              sender: 'assistant',
+              timestamp: new Date().toISOString()
+            })
+
+            // Set as current challenge
+            setCurrentChallenge(challengeData)
+            setIsLoading(false)
+            return
+          }
+        } catch (e) {
+          console.log('JSON parse error or not a practice message:', e)
+          // Not JSON, treat as regular text
+        }
+
+        addMessage({
+          type: 'text',
+          content: messageContent,
+          sender: 'assistant',
+          timestamp: new Date().toISOString()
+        })
+      } else {
+        throw new Error(result.error || 'Unknown error')
+      }
+
+      setIsLoading(false)
     } catch (error) {
       console.error('Error sending message:', error)
-      const errorMessage = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: 'Sorry, I\'m having trouble connecting right now. Please try again.',
-        timestamp: new Date(),
-        type: 'error'
-      }
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
+      addMessage({
+        type: 'text',
+        content: 'Sorry, I encountered an error. Please try again.',
+        sender: 'assistant',
+        timestamp: new Date().toISOString()
+      })
       setIsLoading(false)
     }
   }
 
-  const generatePracticeSentence = async () => {
+  const handleAudioMessage = async (audioBlob, duration) => {
+    const audioUrl = URL.createObjectURL(audioBlob)
+    addMessage({
+      type: 'audio',
+      content: audioUrl,
+      sender: 'user',
+      timestamp: new Date().toISOString(),
+      duration: duration
+    })
+
     setIsLoading(true)
-    try {
-      const response = await fetch(`${conversationServiceUrl}/user/${userId}/generate-sentence?language=${selectedLanguage}&difficulty=beginner`)
-      
-      if (response.ok) {
-        const result = await response.json()
-        if (result.success) {
-          setCurrentPractice(result.sentence_data)
-          setShowPronunciationMode(true)
-          
-          const practiceMessage = {
-            id: Date.now(),
-            role: 'assistant',
-            content: `Here's a sentence to practice: "${result.sentence_data.original}"`,
-            timestamp: new Date(),
-            type: 'practice',
-            practiceData: result.sentence_data
-          }
-          setMessages(prev => [...prev, practiceMessage])
-        }
-      }
-    } catch (error) {
-      console.error('Error generating sentence:', error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
-  const handleAudioRecorded = async (audioBlob) => {
-    if (!currentPractice) return
-
-    setIsEvaluating(true)
-    
     try {
-      // First upload audio to audio service
+      // Send audio to ASR service
       const formData = new FormData()
-      formData.append('audio', audioBlob, 'recording.wav')
-      formData.append('user_id', userId)
+      formData.append('file', audioBlob, 'recording.wav')
 
-      const uploadResponse = await fetch(`${audioServiceUrl}/audio/upload`, {
+      const response = await fetch('/api/audio/process', {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
         body: formData
       })
 
-      if (uploadResponse.ok) {
-        const uploadResult = await uploadResponse.json()
-        const audioFileId = uploadResult.id
+      if (!response.ok) {
+        throw new Error('ASR processing failed')
+      }
 
-        // Now evaluate pronunciation
-        const evalResponse = await fetch(`${conversationServiceUrl}/evaluate-pronunciation`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            user_id: userId,
-            audio_file_id: audioFileId,
-            intended_text: currentPractice.original,
-            language: selectedLanguage
-          })
+      const result = await response.json()
+
+      // Add transcribed text message
+      if (result.transcription) {
+        addMessage({
+          type: 'text',
+          content: `Transcription: "${result.transcription}"`,
+          sender: 'assistant',
+          timestamp: new Date().toISOString()
         })
+      }
 
-        if (evalResponse.ok) {
-          const evalResult = await evalResponse.json()
-          if (evalResult.success) {
-            const evaluationMessage = {
-              id: Date.now(),
-              role: 'assistant',
-              content: evalResult.llm_response,
-              timestamp: new Date(),
-              type: 'evaluation',
-              evaluationData: evalResult.evaluation_results
-            }
-            setMessages(prev => [...prev, evaluationMessage])
-          }
-        }
-      }
+      setIsLoading(false)
     } catch (error) {
-      console.error('Error evaluating pronunciation:', error)
-      const errorMessage = {
-        id: Date.now(),
-        role: 'assistant',
-        content: 'Sorry, I had trouble evaluating your pronunciation. Please try again.',
-        timestamp: new Date(),
-        type: 'error'
-      }
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsEvaluating(false)
+      console.error('Error processing audio:', error)
+      addMessage({
+        type: 'text',
+        content: 'Sorry, I could not process your audio. Please try again.',
+        sender: 'assistant',
+        timestamp: new Date().toISOString()
+      })
+      setIsLoading(false)
     }
   }
 
-  const MessageBubble = ({ message }) => {
-    const isUser = message.role === 'user'
-    const isSystem = message.type === 'welcome' || message.type === 'error'
-    
-    return (
-      <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-        <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-          isUser 
-            ? 'bg-gradient-to-r from-primary to-purple-600 text-white' 
-            : isSystem
-            ? 'bg-gray-800 text-gray-300 border border-gray-700'
-            : 'glass-card text-white'
-        }`}>
-          {/* Message content */}
-          <div className="text-sm leading-relaxed">
-            {message.content}
-          </div>
-          
-          {/* Practice sentence display */}
-          {message.type === 'practice' && message.practiceData && (
-            <div className="mt-3 p-3 bg-gray-800/50 rounded-lg">
-              <div className="text-lg font-medium text-center mb-2">
-                {message.practiceData.original}
-              </div>
-              {message.practiceData.romanized !== message.practiceData.original && (
-                <div className="text-gray-400 text-center text-sm">
-                  🔤 {message.practiceData.romanized}
-                </div>
-              )}
-              <div className="flex justify-center mt-2">
-                <button className="btn-secondary p-2" title="Play pronunciation guide">
-                  <Volume2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
-          
-          {/* Evaluation results */}
-          {message.type === 'evaluation' && message.evaluationData && (
-            <div className="mt-3 space-y-3">
-              <div className="flex items-center justify-center space-x-4">
-                <div className="text-center">
-                  <div className={`text-2xl font-bold ${
-                    message.evaluationData.metrics.accuracy_percentage >= 90 ? 'text-green-400' :
-                    message.evaluationData.metrics.accuracy_percentage >= 70 ? 'text-yellow-400' :
-                    'text-red-400'
-                  }`}>
-                    {message.evaluationData.metrics.accuracy_percentage}%
-                  </div>
-                  <div className="text-xs text-gray-400">Accuracy</div>
-                </div>
-                <Award className="w-6 h-6 text-yellow-500" />
-              </div>
-              
-              {message.evaluationData.pronunciation_errors.length > 0 && (
-                <div className="text-xs bg-gray-800/50 rounded p-2">
-                  <div className="font-medium text-orange-400 mb-1">Areas to improve:</div>
-                  {message.evaluationData.pronunciation_errors.slice(0, 3).map((error, idx) => (
-                    <div key={idx} className="text-gray-300">
-                      • {error.expected_word} → {error.actual_word}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          
-          {/* Timestamp */}
-          <div className="text-xs opacity-60 mt-2">
-            {new Date(message.timestamp).toLocaleTimeString([], { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            })}
-          </div>
-        </div>
-      </div>
-    )
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      })
+
+      streamRef.current = stream
+      audioChunksRef.current = []
+
+      // Set up audio analysis for level monitoring
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
+      analyserRef.current = audioContextRef.current.createAnalyser()
+      const source = audioContextRef.current.createMediaStreamSource(stream)
+      source.connect(analyserRef.current)
+      analyserRef.current.fftSize = 256
+
+      // Set up media recorder
+      mediaRecorderRef.current = new MediaRecorder(stream)
+      mediaRecorderRef.current.ondataavailable = (event) => audioChunksRef.current.push(event.data)
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' })
+        handleAudioMessage(audioBlob, recordingTime)
+        streamRef.current?.getTracks().forEach(track => track.stop())
+        streamRef.current = null
+      }
+
+      mediaRecorderRef.current.start()
+      setIsRecording(true)
+      setRecordingTime(0)
+
+      // Start timer and level monitoring
+      recordingIntervalRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000)
+      startAudioLevelMonitoring()
+
+    } catch (error) {
+      console.error('Error starting recording:', error)
+      alert('Could not access microphone. Please check permissions.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      clearInterval(recordingIntervalRef.current)
+      clearInterval(levelIntervalRef.current)
+      setAudioLevel(0)
+      setRecordingTime(0)
+    }
+  }
+
+  const startAudioLevelMonitoring = () => {
+    if (!analyserRef.current) return
+
+    const bufferLength = analyserRef.current.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+
+    levelIntervalRef.current = setInterval(() => {
+      analyserRef.current.getByteFrequencyData(dataArray)
+      const average = dataArray.reduce((a, b) => a + b) / bufferLength
+      const percentage = (average / 255) * 100
+      setAudioLevel(percentage)
+    }, 100)
+  }
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const playAudio = (audioUrl) => {
+    if (currentAudio) {
+      currentAudio.pause()
+      currentAudio.currentTime = 0
+    }
+
+    const audio = new Audio(audioUrl)
+    setCurrentAudio(audio)
+    setCurrentAudioUrl(audioUrl)
+
+    audio.play().catch(error => {
+      console.error('Error playing audio:', error)
+    })
+
+    audio.onended = () => {
+      setCurrentAudio(null)
+      setCurrentAudioUrl(null)
+    }
+
+    audio.onerror = () => {
+      console.error('Audio playback error')
+      setCurrentAudio(null)
+      setCurrentAudioUrl(null)
+    }
+  }
+
+  const formatTimestamp = (timestamp) => {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-gray-900 via-purple-900/20 to-gray-900">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-purple-900/20 to-slate-900">
       {/* Header */}
-      <div className="glass-card p-4 border-b border-gray-700/50">
+      <header className="glass border-b border-white/10 p-4 sticky top-0 z-10 backdrop-blur-xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-primary to-purple-600 rounded-full flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+            <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-r from-primary to-purple-600 rounded-full">
+              <Mic2 className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">Munshi</h1>
-              <p className="text-sm text-gray-400">AI Language Learning Companion</p>
+              <h1 className="font-semibold text-white">Munshi AI</h1>
+              <p className="text-sm text-gray-400">
+                {selectedLanguage ? `Learning ${selectedLanguage}` : 'Language Learning Assistant'}
+              </p>
             </div>
           </div>
           
-          <div className="flex items-center space-x-3">
-            <select
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
-            >
-              {languages.map(lang => (
-                <option key={lang} value={lang}>{lang}</option>
-              ))}
-            </select>
-            
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 text-sm text-gray-300">
+              <User className="w-4 h-4" />
+              <span>{user?.email}</span>
+            </div>
             <button
-              onClick={generatePracticeSentence}
-              disabled={isLoading}
-              className="btn-secondary px-4 py-2 text-sm"
-              title="Generate practice sentence"
+              onClick={logout}
+              className="btn-secondary p-2"
+              title="Logout"
             >
-              <Mic className="w-4 h-4 mr-2" />
-              Practice
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 chat-scrollbar">
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-5xl mx-auto p-4 space-y-4">
+          {/* Messages Area */}
+          <div className="space-y-4">
         {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+          <div
+            key={message.id}
+            className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div className={`max-w-xs lg:max-w-md ${
+              message.sender === 'user' 
+                ? 'chat-bubble-user' 
+                : 'chat-bubble-assistant'
+            }`}>
+              {message.type === 'text' ? (
+                <p className="text-sm">{message.content}</p>
+              ) : message.type === 'practice' ? (
+                <div className="space-y-2">
+                  <div className="text-lg font-semibold">{message.content}</div>
+                  <div className="text-sm text-gray-300">🔤 {message.romanized}</div>
+                  <div className="text-xs text-gray-400">{message.translation}</div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => playAudio(message.content)}
+                      className="flex items-center space-x-2 bg-white/20 hover:bg-white/30 rounded-lg px-3 py-2 transition-colors"
+                    >
+                      <Mic2 className="w-4 h-4" />
+                      <span className="text-sm">Play Audio</span>
+                    </button>
+                    {message.duration && (
+                      <span className="text-xs text-gray-300">
+                        {Math.round(message.duration)}s
+                      </span>
+                    )}
+                  </div>
+                  {currentAudio && currentAudioUrl === message.content && (
+                    <AudioSpectrum audio={currentAudio} />
+                  )}
+                </div>
+              )}
+              <div className="text-xs opacity-70 mt-2">
+                {formatTimestamp(message.timestamp)}
+              </div>
+            </div>
+          </div>
         ))}
-        
+
         {isLoading && (
-          <div className="flex justify-start mb-4">
-            <div className="glass-card rounded-2xl px-4 py-3">
+          <div className="flex justify-start">
+            <div className="chat-bubble-assistant">
               <div className="flex items-center space-x-2">
                 <div className="flex space-x-1">
                   <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                 </div>
-                <span className="text-gray-400 text-sm">Thinking...</span>
+                <span className="text-sm text-gray-300">Thinking...</span>
               </div>
             </div>
           </div>
         )}
-        
-        <div ref={messagesEndRef} />
+
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
       </div>
 
-      {/* Pronunciation Practice Mode */}
-      {showPronunciationMode && currentPractice && (
-        <div className="glass-card p-4 border-t border-gray-700/50">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-white">Pronunciation Practice</h3>
-            <button
-              onClick={() => setShowPronunciationMode(false)}
-              className="btn-secondary p-2"
-              title="Close practice mode"
-            >
-              <Square className="w-4 h-4" />
-            </button>
-          </div>
-          
-          <div className="text-center space-y-3">
-            <div className="text-xl text-white font-medium">
-              {currentPractice.original}
-            </div>
-            {currentPractice.romanized !== currentPractice.original && (
-              <div className="text-gray-400">
-                🔤 {currentPractice.romanized}
-              </div>
-            )}
-            
-            <div className="flex justify-center">
-              <AudioRecorder 
-                onAudioRecorded={handleAudioRecorded}
-                disabled={isEvaluating}
-              />
-            </div>
-            
-            {isEvaluating && (
-              <div className="text-center text-gray-400">
-                <div className="flex items-center justify-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                  <span>Evaluating your pronunciation...</span>
-                </div>
-              </div>
-            )}
+      {/* Challenge Box - Fixed at bottom */}
+      {isLanguageSelected && currentChallenge && (
+        <div className="border-t border-white/10 bg-slate-900/90 backdrop-blur-xl">
+          <div className="max-w-5xl mx-auto p-4">
+            <ChallengeBox
+              token={token}
+              language={selectedLanguage}
+              initialChallenge={currentChallenge}
+              onClearChallenge={() => setCurrentChallenge(null)}
+              onNewChallenge={(sentence) => {
+                setCurrentChallenge(sentence)
+              }}
+            />
           </div>
         </div>
       )}
 
       {/* Input Area */}
-      <div className="glass-card p-4 border-t border-gray-700/50">
-        <div className="flex items-center space-x-3">
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder="Type your message or ask for help..."
-              disabled={isLoading}
-              className="w-full bg-gray-800 border border-gray-700 rounded-full px-4 py-3 text-white placeholder-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50"
-            />
-          </div>
-          
+      <div className="border-t border-white/10 p-4 bg-slate-900/50 backdrop-blur-xl">
+        <div className="max-w-5xl mx-auto">
+        <form onSubmit={handleTextSubmit} className="flex items-center space-x-2">
+          {/* Text Input */}
+          <input
+            type="text"
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            placeholder="Type your message..."
+            className="input-field flex-1"
+            disabled={isLoading}
+          />
+
+          {/* Send Button */}
           <button
-            onClick={sendMessage}
-            disabled={isLoading || !inputMessage.trim()}
-            className="btn-primary p-3 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Send message"
+            type="submit"
+            disabled={!textInput.trim() || isLoading || isRecording}
+            className="btn-primary px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
           >
             <Send className="w-5 h-5" />
           </button>
-        </div>
-        
-        <div className="flex justify-center mt-3">
-          <div className="text-xs text-gray-500">
-            💡 Try saying "I want to practice [language]" or "Help me with pronunciation"
-          </div>
+        </form>
         </div>
       </div>
     </div>
   )
 }
 
-export default ChatInterface
+export default Chat
